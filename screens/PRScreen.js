@@ -15,12 +15,14 @@ import {
   Platform,
   Dimensions,
   useWindowDimensions,
+  TouchableOpacity,
+  ActivityIndicator,
+  KeyboardAvoidingView,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useUser } from "../context/UserContext"
 import { commonExercises } from "../data/prData"
 import GlassmorphicCard from "../components/GlassmorphicCard"
-import HoverButton from "../components/HoverButton"
 // Add the import for our new chart components at the top of the file
 import ProgressChart from "../components/ProgressChart"
 import PredictionChart from "../components/PredictionChart"
@@ -30,7 +32,15 @@ const { width, height } = Dimensions.get("window")
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 
 const PRScreen = () => {
-  const { userProfile, personalRecords, addPersonalRecord, updatePersonalRecord, deletePersonalRecord } = useUser()
+  const {
+    userProfile,
+    personalRecords,
+    addPersonalRecord,
+    updatePersonalRecord,
+    deletePersonalRecord,
+    resetPersonalRecords,
+    isLoading: userLoading,
+  } = useUser()
   const [modalVisible, setModalVisible] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [currentPR, setCurrentPR] = useState(null)
@@ -43,12 +53,11 @@ const PRScreen = () => {
   const [predictionDetails, setPredictionDetails] = useState(null)
   const [showPredictionModal, setShowPredictionModal] = useState(false)
   const { width: windowWidth } = useWindowDimensions()
-
-  // Animation for progress bars - using layout animation instead of direct width manipulation
-  const progressValues = useRef(personalRecords.map(() => new Animated.Value(0))).current
-
-  // Get PRs with targets
+  const [isLoading, setIsLoading] = useState(true)
   const [prGoals, setPrGoals] = useState([])
+
+  // Animation for progress bars
+  const progressValues = useRef([]).current
 
   // Define trainingLevels here
   const trainingLevels = [
@@ -58,11 +67,32 @@ const PRScreen = () => {
   ]
 
   useEffect(() => {
+    // Add a small delay to ensure data is loaded
+    const timer = setTimeout(() => {
+      setIsLoading(false)
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    console.log("Personal Records in PRScreen:", personalRecords)
+
+    // Initialize progress animation values if needed
+    if (personalRecords.length > progressValues.length) {
+      const newValues = Array(personalRecords.length - progressValues.length)
+        .fill(0)
+        .map(() => new Animated.Value(0))
+      progressValues.push(...newValues)
+    }
+
     // Transform personal records to include targets
     const goals = personalRecords.map((pr) => ({
       ...pr,
-      target: pr.target || Number.parseInt(pr.value * 1.2), // Default target is 20% higher than current PR
+      target: pr.target || Math.round(pr.value * 1.2), // Default target is 20% higher than current PR
     }))
+
+    console.log("PR Goals:", goals)
     setPrGoals(goals)
 
     // Animate progress bars
@@ -260,57 +290,67 @@ const PRScreen = () => {
 
   // Show detailed prediction information
   const showPredictionInfo = (pr) => {
-    // Get exercise history
-    const exerciseHistory = personalRecords.filter((record) => record.exercise === pr.exercise)
+    try {
+      console.log("Showing prediction info for:", pr)
 
-    // Calculate prediction details
-    const timeToGoal = calculateTimeToGoal(pr.value, pr.target, exerciseHistory, pr.exercise)
-    const progress = calculateProgress(pr.value, pr.target)
+      // Get exercise history
+      const exerciseHistory = personalRecords.filter((record) => record.exercise === pr.exercise)
+      console.log("Exercise history:", exerciseHistory)
 
-    // Calculate average improvement rate
-    let improvementRate = "Unknown"
-    if (exerciseHistory.length >= 2) {
-      const sortedHistory = [...exerciseHistory].sort((a, b) => new Date(b.date) - new Date(a.date))
-      const newest = sortedHistory[0].value
-      const oldest = sortedHistory[sortedHistory.length - 1].value
-      const daysDiff =
-        (new Date(sortedHistory[0].date) - new Date(sortedHistory[sortedHistory.length - 1].date)) /
-        (1000 * 60 * 60 * 24)
+      // Calculate prediction details
+      const timeToGoal = calculateTimeToGoal(pr.value, pr.target, exerciseHistory, pr.exercise)
+      const progress = calculateProgress(pr.value, pr.target)
 
-      if (daysDiff > 0 && newest > oldest) {
-        const dailyRate = (newest - oldest) / oldest / daysDiff
-        improvementRate = `${(dailyRate * 30 * 100).toFixed(2)}% per month`
+      // Calculate average improvement rate
+      let improvementRate = "Unknown"
+      if (exerciseHistory.length >= 2) {
+        const sortedHistory = [...exerciseHistory].sort((a, b) => new Date(b.date) - new Date(a.date))
+        const newest = sortedHistory[0].value
+        const oldest = sortedHistory[sortedHistory.length - 1].value
+        const daysDiff =
+          (new Date(sortedHistory[0].date) - new Date(sortedHistory[sortedHistory.length - 1].date)) /
+          (1000 * 60 * 60 * 24)
+
+        if (daysDiff > 0 && newest > oldest) {
+          const dailyRate = (newest - oldest) / oldest / daysDiff
+          improvementRate = `${(dailyRate * 30 * 100).toFixed(2)}% per month`
+        }
       }
+
+      // Get training level impact description
+      let trainingLevelImpact = ""
+      switch (userProfile.trainingLevel) {
+        case "beginner":
+          trainingLevelImpact = "As a beginner, your progress predictions are accelerated (20% faster)"
+          break
+        case "advanced":
+          trainingLevelImpact = "As an advanced lifter, your progress predictions are more conservative (20% slower)"
+          break
+        default:
+          trainingLevelImpact = "As an intermediate lifter, your progress predictions are balanced"
+      }
+
+      // Set prediction details
+      const details = {
+        exercise: pr.exercise,
+        current: pr.value,
+        target: pr.target,
+        unit: pr.unit,
+        timeToGoal,
+        progress,
+        improvementRate,
+        historyCount: exerciseHistory.length,
+        trainingLevel: userProfile.trainingLevel,
+        trainingLevelImpact,
+      }
+
+      console.log("Setting prediction details:", details)
+      setPredictionDetails(details)
+      setShowPredictionModal(true)
+    } catch (error) {
+      console.error("Error showing prediction info:", error)
+      Alert.alert("Error", "Failed to show progress information. Please try again.")
     }
-
-    // Get training level impact description
-    let trainingLevelImpact = ""
-    switch (userProfile.trainingLevel) {
-      case "beginner":
-        trainingLevelImpact = "As a beginner, your progress predictions are accelerated (20% faster)"
-        break
-      case "advanced":
-        trainingLevelImpact = "As an advanced lifter, your progress predictions are more conservative (20% slower)"
-        break
-      default:
-        trainingLevelImpact = "As an intermediate lifter, your progress predictions are balanced"
-    }
-
-    // Set prediction details
-    setPredictionDetails({
-      exercise: pr.exercise,
-      current: pr.value,
-      target: pr.target,
-      unit: pr.unit,
-      timeToGoal,
-      progress,
-      improvementRate,
-      historyCount: exerciseHistory.length,
-      trainingLevel: userProfile.trainingLevel,
-      trainingLevelImpact,
-    })
-
-    setShowPredictionModal(true)
   }
 
   // Get the title of the selected training level
@@ -319,115 +359,176 @@ const PRScreen = () => {
     return level ? level.title : "Not set"
   }
 
+  // Add a function to create sample PR data for testing
+  const createSamplePRs = async () => {
+    const samplePRs = [
+      {
+        exercise: "Bench Press",
+        value: 185,
+        unit: "lbs",
+        target: 225,
+      },
+      {
+        exercise: "Squat",
+        value: 275,
+        unit: "lbs",
+        target: 315,
+      },
+      {
+        exercise: "Deadlift",
+        value: 315,
+        unit: "lbs",
+        target: 405,
+      },
+    ]
+
+    for (const pr of samplePRs) {
+      await addPersonalRecord(pr)
+    }
+
+    Alert.alert("Sample PRs Added", "Sample PR data has been added for testing.")
+  }
+
+  // Reset PRs to initial data
+  const handleResetPRs = () => {
+    Alert.alert("Reset PRs", "Are you sure you want to reset all PRs to default values? This cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Reset",
+        style: "destructive",
+        onPress: async () => {
+          const result = await resetPersonalRecords()
+          if (result.success) {
+            Alert.alert("Success", "Personal records have been reset to default values.")
+          } else {
+            Alert.alert("Error", result.error || "Failed to reset personal records.")
+          }
+        },
+      },
+    ])
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>PR Goals</Text>
-          <HoverButton
-            text="See All"
-            textStyle={styles.seeAllText}
-            style={styles.seeAllButton}
-            activeOpacity={0.7}
-            hoverColor="rgba(0, 153, 255, 0.1)"
-          />
+          <View style={styles.headerButtons}>
+            <TouchableOpacity style={styles.headerButton} onPress={handleResetPRs}>
+              <Ionicons name="refresh-outline" size={22} color="white" />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {prGoals.length === 0 ? (
+        {isLoading || userLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="cyan" />
+            <Text style={styles.loadingText}>Loading PR data...</Text>
+          </View>
+        ) : prGoals.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="trophy" size={80} color="rgba(0, 153, 255, 0.3)" />
             <Text style={styles.emptyText}>No personal records yet</Text>
             <Text style={styles.emptySubtext}>Tap the button below to add your first PR</Text>
+
+            {/* Add a button to create sample PRs for testing */}
+            <TouchableOpacity style={styles.sampleButton} onPress={createSamplePRs}>
+              <Text style={styles.sampleButtonText}>Add Sample PRs</Text>
+            </TouchableOpacity>
           </View>
         ) : (
-          <ScrollView 
-            showsVerticalScrollIndicator={false} 
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollViewContent}
-          >
-            {prGoals.map((pr, index) => (
-              <GlassmorphicCard
-                key={pr.id}
-                style={styles.prCard}
-                color="rgba(0, 20, 20, 0.5)"
-                borderColor="rgba(0, 153, 255, 0.3)"
+          <>
+            <View style={styles.scrollViewWrapper}>
+              <ScrollView
+                showsVerticalScrollIndicator={true}
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollViewContent}
               >
-                <View style={styles.prCardContent}>
-                  <Text style={styles.prExercise}>{pr.exercise}</Text>
-                  <Text style={styles.prValue}>
-                    {pr.value} <Text style={styles.prUnit}>{pr.unit}</Text>
-                  </Text>
-                </View>
-                <View style={styles.prDetails}>
-                  <View style={styles.targetRow}>
-                    <Text style={styles.prTarget}>
-                      Target: {pr.target} {pr.unit}
-                    </Text>
-                    <HoverButton
-                      style={styles.predictionBadge}
-                      onPress={() => showPredictionInfo(pr)}
-                      activeOpacity={0.7}
-                      hoverColor="rgba(0, 153, 255, 0.2)"
-                    >
-                      <Text style={styles.predictionText}>
-                        {calculateTimeToGoal(
-                          pr.value,
-                          pr.target,
-                          personalRecords.filter((record) => record.exercise === pr.exercise),
-                          pr.exercise,
-                        )}
+                {prGoals.map((pr, index) => (
+                  <GlassmorphicCard
+                    key={pr.id}
+                    style={styles.prCard}
+                    color="rgba(0, 20, 20, 0.5)"
+                    borderColor="rgba(0, 153, 255, 0.3)"
+                  >
+                    <View style={styles.prCardContent}>
+                      <Text style={styles.prExercise} numberOfLines={1} ellipsizeMode="tail">
+                        {pr.exercise}
                       </Text>
-                      <Ionicons name="information-circle-outline" size={16} color="#0099ff" />
-                    </HoverButton>
-                  </View>
-                  <View style={styles.progressBarContainer}>
-                    <Animated.View
-                      style={[
-                        styles.progressBar,
-                        {
-                          width: progressValues[index]?.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: ["0%", "100%"],
-                          }),
-                        },
-                      ]}
-                    />
-                  </View>
-                  <View style={styles.actionRow}>
-                    <HoverButton
-                      style={styles.editButton}
-                      onPress={() => handleOpenModal(pr)}
-                      activeOpacity={0.7}
-                      hoverColor="rgba(255, 255, 255, 0.2)"
-                    >
-                      <Ionicons name="create-outline" size={16} color="white" />
-                      <Text style={styles.editButtonText}>Edit</Text>
-                    </HoverButton>
+                      <Text style={styles.prValue}>
+                        {pr.value} <Text style={styles.prUnit}>{pr.unit}</Text>
+                      </Text>
+                    </View>
+                    <View style={styles.prDetails}>
+                      <View style={styles.targetRow}>
+                        <Text style={styles.prTarget}>
+                          Target: {pr.target} {pr.unit}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.predictionBadge}
+                          onPress={() => showPredictionInfo(pr)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.predictionText}>
+                            {calculateTimeToGoal(
+                              pr.value,
+                              pr.target,
+                              personalRecords.filter((record) => record.exercise === pr.exercise),
+                              pr.exercise,
+                            )}
+                          </Text>
+                          <Ionicons name="information-circle-outline" size={14} color="#0099ff" />
+                        </TouchableOpacity>
+                      </View>
+                      <View style={styles.progressBarContainer}>
+                        <Animated.View
+                          style={[
+                            styles.progressBar,
+                            {
+                              width:
+                                progressValues[index]?.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: ["0%", "100%"],
+                                }) || "0%",
+                            },
+                          ]}
+                        />
+                      </View>
+                      <View style={styles.actionRow}>
+                        <TouchableOpacity
+                          style={styles.editButton}
+                          onPress={() => handleOpenModal(pr)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="create-outline" size={14} color="white" />
+                          <Text style={styles.editButtonText}>Edit</Text>
+                        </TouchableOpacity>
 
-                    <HoverButton
-                      style={styles.historyButton}
-                      onPress={() => showPredictionInfo(pr)}
-                      activeOpacity={0.7}
-                      hoverColor="rgba(0, 153, 255, 0.3)"
-                    >
-                      <Ionicons name="analytics-outline" size={16} color="white" />
-                      <Text style={styles.historyButtonText}>Progress</Text>
-                    </HoverButton>
-                  </View>
-                </View>
-              </GlassmorphicCard>
-            ))}
-          </ScrollView>
+                        <TouchableOpacity
+                          style={styles.historyButton}
+                          onPress={() => showPredictionInfo(pr)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="analytics-outline" size={14} color="white" />
+                          <Text style={styles.historyButtonText}>Progress</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </GlassmorphicCard>
+                ))}
+                {/* Add extra padding at the bottom to ensure scrolling works */}
+                <View style={{ height: 100 }} />
+              </ScrollView>
+            </View>
 
-        <HoverButton\
-          style={styles.addButton}
-          onPress={() => handleOpenModal()}
-          activeOpacity={0.8}
-          hoverColor="#00b3ff"
-          pressColor="#0077ff"
-        >
-          <Text style={styles.addButtonText}>Add New PR Goal</Text>
-        </HoverButton>
+            <TouchableOpacity style={styles.addButton} onPress={() => handleOpenModal()} activeOpacity={0.8}>
+              <Ionicons name="add" size={20} color="black" style={styles.addButtonIcon} />
+              <Text style={styles.addButtonText}>Add New PR Goal</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {/* Rest of the modal code remains the same */}
 
         {/* PR Edit Modal */}
         <Modal
@@ -436,126 +537,117 @@ const PRScreen = () => {
           visible={modalVisible}
           onRequestClose={() => setModalVisible(false)}
         >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{editMode ? "Edit PR Goal" : "Add PR Goal"}</Text>
-                <HoverButton onPress={() => setModalVisible(false)} style={styles.closeButton} activeOpacity={0.7}>
-                  <Ionicons name="close" size={24} color="white" />
-                </HoverButton>
-              </View>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={{ flex: 1 }}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
+          >
+            <View style={styles.modalContainer}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>{editMode ? "Edit PR Goal" : "Add PR Goal"}</Text>
+                  <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.closeButton}>
+                    <Ionicons name="close" size={24} color="white" />
+                  </TouchableOpacity>
+                </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Exercise</Text>
-                <TextInput
-                  style={styles.input}
-                  value={exercise}
-                  onChangeText={handleExerciseChange}
-                  placeholder="e.g. Bench Press"
-                  placeholderTextColor="#666"
-                />
-                {showExerciseList && (
-                  <View style={styles.exerciseList}>
-                    {filteredExercises.map((ex, index) => (
-                      <HoverButton
-                        key={index}
-                        style={styles.exerciseItem}
-                        onPress={() => selectExercise(ex)}
-                        activeOpacity={0.7}
-                        hoverColor="rgba(255, 255, 255, 0.1)"
-                      >
-                        <Text style={styles.exerciseItemText}>{ex}</Text>
-                      </HoverButton>
-                    ))}
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.formRow}>
-                <View style={[styles.formGroup, { flex: 2, marginRight: 10 }]}>
-                  <Text style={styles.label}>Current Value</Text>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Exercise</Text>
                   <TextInput
                     style={styles.input}
-                    value={value}
-                    onChangeText={setValue}
-                    keyboardType="numeric"
-                    placeholder="e.g. 225"
+                    value={exercise}
+                    onChangeText={handleExerciseChange}
+                    placeholder="e.g. Bench Press"
                     placeholderTextColor="#666"
                   />
+                  {showExerciseList && (
+                    <View style={styles.exerciseList}>
+                      {filteredExercises.map((ex, index) => (
+                        <TouchableOpacity
+                          key={index}
+                          style={styles.exerciseItem}
+                          onPress={() => selectExercise(ex)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.exerciseItemText}>{ex}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
                 </View>
 
-                <View style={[styles.formGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>Unit</Text>
-                  <View style={styles.unitSelector}>
-                    <HoverButton
-                      style={[styles.unitOption, unit === "lbs" && styles.unitOptionSelected]}
-                      onPress={() => setUnit("lbs")}
-                      activeOpacity={0.7}
-                      hoverColor={unit === "lbs" ? "#0088ff" : "rgba(255, 255, 255, 0.2)"}
-                    >
-                      <Text style={[styles.unitText, unit === "lbs" && styles.unitTextSelected]}>lbs</Text>
-                    </HoverButton>
+                <View style={styles.formRow}>
+                  <View style={[styles.formGroup, { flex: 2, marginRight: 10 }]}>
+                    <Text style={styles.label}>Current Value</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={value}
+                      onChangeText={setValue}
+                      keyboardType="numeric"
+                      placeholder="e.g. 225"
+                      placeholderTextColor="#666"
+                    />
+                  </View>
 
-                    <HoverButton
-                      style={[styles.unitOption, unit === "kg" && styles.unitOptionSelected]}
-                      onPress={() => setUnit("kg")}
-                      activeOpacity={0.7}
-                      hoverColor={unit === "kg" ? "#0088ff" : "rgba(255, 255, 255, 0.2)"}
-                    >
-                      <Text style={[styles.unitText, unit === "kg" && styles.unitTextSelected]}>kg</Text>
-                    </HoverButton>
+                  <View style={[styles.formGroup, { flex: 1 }]}>
+                    <Text style={styles.label}>Unit</Text>
+                    <View style={styles.unitSelector}>
+                      <TouchableOpacity
+                        style={[styles.unitOption, unit === "lbs" && styles.unitOptionSelected]}
+                        onPress={() => setUnit("lbs")}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.unitText, unit === "lbs" && styles.unitTextSelected]}>lbs</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.unitOption, unit === "kg" && styles.unitOptionSelected]}
+                        onPress={() => setUnit("kg")}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.unitText, unit === "kg" && styles.unitTextSelected]}>kg</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
-              </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Target Value</Text>
-                <TextInput
-                  style={styles.input}
-                  value={target}
-                  onChangeText={setTarget}
-                  keyboardType="numeric"
-                  placeholder="e.g. 275"
-                  placeholderTextColor="#666"
-                />
-                {editMode && currentPR && (
-                  <Text style={styles.predictionNote}>
-                    Estimated time to goal:{" "}
-                    {calculateTimeToGoal(
-                      Number.parseFloat(value),
-                      Number.parseFloat(target),
-                      personalRecords.filter((record) => record.exercise === exercise),
-                      exercise,
-                    )}
-                  </Text>
-                )}
-              </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Target Value</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={target}
+                    onChangeText={setTarget}
+                    keyboardType="numeric"
+                    placeholder="e.g. 275"
+                    placeholderTextColor="#666"
+                  />
+                  {editMode && currentPR && (
+                    <Text style={styles.predictionNote}>
+                      Estimated time to goal:{" "}
+                      {calculateTimeToGoal(
+                        Number.parseFloat(value),
+                        Number.parseFloat(target),
+                        personalRecords.filter((record) => record.exercise === exercise),
+                        exercise,
+                      )}
+                    </Text>
+                  )}
+                </View>
 
-              <View style={styles.modalActions}>
-                <HoverButton
-                  style={styles.saveButton}
-                  onPress={handleSave}
-                  activeOpacity={0.8}
-                  hoverColor="#00b3ff"
-                  pressColor="#0077ff"
-                >
-                  <Text style={styles.saveButtonText}>{editMode ? "Update" : "Save"}</Text>
-                </HoverButton>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={styles.saveButton} onPress={handleSave} activeOpacity={0.8}>
+                    <Text style={styles.saveButtonText}>{editMode ? "Update" : "Save"}</Text>
+                  </TouchableOpacity>
 
-                {editMode && (
-                  <HoverButton
-                    style={styles.deleteButton}
-                    onPress={handleDelete}
-                    activeOpacity={0.8}
-                    hoverColor="rgba(255, 59, 48, 0.3)"
-                    pressColor="rgba(255, 59, 48, 0.5)"
-                  >
-                    <Text style={styles.deleteButtonText}>Delete</Text>
-                  </HoverButton>
-                )}
+                  {editMode && (
+                    <TouchableOpacity style={styles.deleteButton} onPress={handleDelete} activeOpacity={0.8}>
+                      <Text style={styles.deleteButtonText}>Delete</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Prediction Details Modal */}
@@ -569,13 +661,9 @@ const PRScreen = () => {
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Progress Prediction</Text>
-                <HoverButton
-                  onPress={() => setShowPredictionModal(false)}
-                  style={styles.closeModalButton}
-                  activeOpacity={0.7}
-                >
+                <TouchableOpacity onPress={() => setShowPredictionModal(false)} style={styles.closeModalButton}>
                   <Ionicons name="close" size={24} color="white" />
-                </HoverButton>
+                </TouchableOpacity>
               </View>
 
               {predictionDetails && (
@@ -664,19 +752,14 @@ const PRScreen = () => {
                 </ScrollView>
               )}
 
-              <HoverButton
-                style={styles.closeButton}
-                onPress={() => setShowPredictionModal(false)}
-                activeOpacity={0.7}
-                hoverColor="rgba(255, 255, 255, 0.2)"
-              >
-                <Text style={styles.closeButtonText}>Close</Text>
-              </HoverButton>
+              <TouchableOpacity style={styles.compactCloseButton} onPress={() => setShowPredictionModal(false)}>
+                <Text style={styles.compactCloseButtonText}>Close</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
       </View>
-  </SafeAreaView>
+    </SafeAreaView>
   )
 }
 
@@ -684,12 +767,12 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "black",
-    paddingTop: Platform && Platform.OS === "ios" ? (isIphoneX ? 50 : 20) : 0,
+    paddingTop: Platform.OS === "ios" ? (isIphoneX ? 50 : 20) : 0,
   },
   container: {
     flex: 1,
     backgroundColor: "black",
-    paddingBottom: Platform && Platform.OS === "ios" ? (isIphoneX ? 90 : 70) : 70, // Increased padding to prevent tab bar overlap
+    paddingBottom: 80, // Increased to ensure space for the add button
   },
   header: {
     flexDirection: "row",
@@ -697,72 +780,93 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 20,
     paddingTop: 10,
-    marginBottom: 20,
+    marginBottom: 15, // Reduced from 20
     width: "100%",
   },
   title: {
     color: "white",
-    fontSize: 28,
+    fontSize: 22, // Reduced from 24
     fontWeight: "bold",
   },
-  seeAllText: {
-    color: "#0099ff",
-    fontSize: 18,
+  headerButtons: {
+    flexDirection: "row",
   },
-  seeAllButton: {
-    padding: 8,
-    borderRadius: 8,
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 10,
+  },
+  scrollViewWrapper: {
+    flex: 1,
+    position: "relative",
   },
   scrollView: {
     flex: 1,
     paddingHorizontal: 20,
-    width: "100%", // Ensure full width
+    width: "100%",
+  },
+  scrollViewContent: {
+    paddingBottom: 120, // Increased padding for floating tab bar and button
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    color: "white",
+    fontSize: 18,
+    marginTop: 15,
   },
   emptyContainer: {
+    flex: 1,
     alignItems: "center",
     paddingHorizontal: 40,
     paddingVertical: 100,
     justifyContent: "center",
   },
-  emptyText: {
-    color: "white",
-    fontSize: 20,
-    fontWeight: "bold",
+  sampleButton: {
+    backgroundColor: "#0099ff",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
     marginTop: 20,
-    marginBottom: 10,
   },
-  emptySubtext: {
-    color: "#aaa",
-    fontSize: 16,
-    textAlign: "center",
+  sampleButtonText: {
+    color: "white",
+    fontWeight: "bold",
   },
   prCard: {
-    marginBottom: 20,
-    padding: 20,
+    marginBottom: 10, // Reduced from 12
+    padding: 12, // Kept the same
     width: "100%",
   },
   prCardContent: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 15,
+    marginBottom: 12, // Reduced from 15
     width: "100%",
     flexWrap: "wrap",
   },
   prExercise: {
     color: "white",
-    fontSize: 22, // Slightly smaller for mobile
+    fontSize: Platform.OS === "ios" ? 15 : 16, // Reduced from 16/18
     fontWeight: "bold",
-    flexShrink: 1, // Allow text to shrink if needed
-    maxWidth: "60%", // Limit width to prevent overlap
+    flexShrink: 1,
+    maxWidth: "60%",
   },
   prValue: {
     color: "#0099ff",
-    fontSize: 32,
+    fontSize: Platform.OS === "ios" ? 20 : 24, // Reduced from 22/26
     fontWeight: "bold",
   },
   prUnit: {
-    fontSize: 24,
+    fontSize: Platform.OS === "ios" ? 16 : 18, // Reduced from 20/24
   },
   prDetails: {
     marginTop: 5,
@@ -771,101 +875,116 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: 6, // Reduced from 8
   },
   prTarget: {
     color: "#aaa",
-    fontSize: 16,
+    fontSize: 13, // Reduced from 14
   },
   predictionBadge: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(0, 153, 255, 0.1)",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 8, // Kept the same
+    paddingVertical: 3, // Kept the same
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(0, 153, 255, 0.3)",
   },
   predictionText: {
     color: "#0099ff",
-    fontSize: 14,
+    fontSize: 12, // Kept the same
     fontWeight: "500",
-    marginRight: 5,
+    marginRight: 4, // Kept the same
   },
   progressBarContainer: {
-    height: 10,
+    height: 6, // Reduced from 8
     backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 5,
+    borderRadius: 3, // Reduced from 4
     overflow: "hidden",
-    marginBottom: 15,
+    marginBottom: 8, // Reduced from 10
   },
   progressBar: {
     height: "100%",
     backgroundColor: "#0099ff",
-    borderRadius: 5,
+    borderRadius: 3, // Reduced from 4
   },
   actionRow: {
     flexDirection: "row",
     justifyContent: "flex-end",
+    marginBottom: 0, // Removed bottom margin
   },
   editButton: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(255, 255, 255, 0.1)",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    marginLeft: 10,
+    paddingVertical: 4, // Reduced from 5
+    paddingHorizontal: 8, // Reduced from 10
+    borderRadius: 12, // Reduced from 15
+    marginLeft: 8, // Kept the same
   },
   editButtonText: {
     color: "white",
-    fontSize: 14,
-    marginLeft: 5,
+    fontSize: 12, // Kept the same
+    marginLeft: 4, // Kept the same
   },
   historyButton: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(0, 153, 255, 0.2)",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    marginLeft: 10,
+    paddingVertical: 4, // Reduced from 5
+    paddingHorizontal: 8, // Reduced from 10
+    borderRadius: 12, // Reduced from 15
+    marginLeft: 8, // Kept the same
   },
   historyButtonText: {
     color: "white",
-    fontSize: 14,
-    marginLeft: 5,
+    fontSize: 12, // Kept the same
+    marginLeft: 4, // Kept the same
   },
   addButton: {
     backgroundColor: "#0099ff",
-    borderRadius: 30,
-    padding: 16,
-    margin: 20,
+    borderRadius: 25,
+    padding: 12,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0077ff",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 4,
     position: "absolute",
-    bottom: Platform && Platform.OS === "ios" ? (isIphoneX ? 90 : 70) : 70,
-    left: 20,
-    right: 20,
-    zIndex: 10,
+    bottom: 100, // Increased from 20 to 100 to move it up above the tab bar
+    left: "50%",
+    marginLeft: -100, // Half of the width
+    width: 200,
+    zIndex: 100,
+  },
+  addButtonIcon: {
+    marginRight: 8,
   },
   addButtonText: {
     color: "black",
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: "bold",
   },
   modalContainer: {
     flex: 1,
-    justifyContent: "flex-end",
+    justifyContent: "center",
     backgroundColor: "rgba(0, 0, 0, 0.7)",
+    padding: 20,
   },
   modalContent: {
     backgroundColor: "#121212",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: Platform.OS === "ios" ? (isIphoneX ? 40 : 20) : 20,
-    maxHeight: "90%",
+    paddingBottom: Platform.OS === "ios" ? (isIphoneX ? 30 : 20) : 20,
+    maxHeight: Platform.OS === "ios" ? "85%" : "90%", // Increased slightly to show more content
+    width: "100%",
   },
   modalHeader: {
     flexDirection: "row",
@@ -875,24 +994,32 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     color: "white",
-    fontSize: 20,
+    fontSize: 18, // Reduced from 20
     fontWeight: "bold",
   },
+  closeButton: {
+    padding: 8,
+    borderRadius: 20,
+  },
+  closeModalButton: {
+    padding: 8,
+    borderRadius: 20,
+  },
   formGroup: {
-    marginBottom: 20,
+    marginBottom: 15, // Reduced from 20
   },
   formRow: {
     flexDirection: "row",
   },
   label: {
     color: "white",
-    fontSize: 16,
-    marginBottom: 8,
+    fontSize: 14, // Reduced from 16
+    marginBottom: 6, // Reduced from 8
   },
   input: {
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 10,
-    padding: 15,
+    padding: 12, // Reduced from 15
     color: "white",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.2)",
@@ -904,13 +1031,13 @@ const styles = StyleSheet.create({
     maxHeight: 150,
   },
   exerciseItem: {
-    padding: 12,
+    padding: 10, // Reduced from 12
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255, 255, 255, 0.1)",
   },
   exerciseItemText: {
     color: "white",
-    fontSize: 16,
+    fontSize: 14, // Reduced from 16
   },
   unitSelector: {
     flexDirection: "row",
@@ -922,7 +1049,7 @@ const styles = StyleSheet.create({
   },
   unitOption: {
     flex: 1,
-    padding: 15,
+    padding: 12, // Reduced from 15
     alignItems: "center",
   },
   unitOptionSelected: {
@@ -930,18 +1057,18 @@ const styles = StyleSheet.create({
   },
   unitText: {
     color: "white",
-    fontSize: 16,
+    fontSize: 14, // Reduced from 16
   },
   unitTextSelected: {
     color: "black",
     fontWeight: "bold",
   },
   modalActions: {
-    marginTop: 20,
+    marginTop: 15, // Reduced from 20
   },
   saveButton: {
     backgroundColor: "#0099ff",
-    padding: 15,
+    padding: 12, // Reduced from 15
     borderRadius: 10,
     alignItems: "center",
     marginBottom: 10,
@@ -953,7 +1080,7 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     backgroundColor: "rgba(255, 59, 48, 0.2)",
-    padding: 15,
+    padding: 12, // Reduced from 15
     borderRadius: 10,
     alignItems: "center",
     borderWidth: 1,
@@ -972,69 +1099,13 @@ const styles = StyleSheet.create({
   },
   predictionContainer: {
     marginBottom: 20,
-    maxHeight: "80%",
+    maxHeight: Platform.OS === "ios" ? "65%" : "75%", // Increased to show more content
   },
   predictionTitle: {
     color: "#0099ff",
-    fontSize: 22,
+    fontSize: 18, // Reduced from 20
     fontWeight: "bold",
     marginBottom: 15,
-    textAlign: "center",
-  },
-  predictionRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  predictionLabel: {
-    color: "#aaa",
-    fontSize: 16,
-  },
-  predictionValue: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  predictionProgressBar: {
-    height: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 6,
-    overflow: "hidden",
-    marginBottom: 20,
-  },
-  predictionProgressFill: {
-    height: "100%",
-    backgroundColor: "#0099ff",
-    borderRadius: 6,
-  },
-  closeButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    padding: 15,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  closeButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  closeModalButton: {
-    padding: 8,
-    borderRadius: 20,
-  },
-  trainingLevelImpactContainer: {
-    backgroundColor: "rgba(0, 153, 255, 0.1)",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "rgba(0, 153, 255, 0.3)",
-  },
-  trainingLevelImpactText: {
-    color: "#0099ff",
-    fontSize: 14,
-    fontStyle: "italic",
     textAlign: "center",
   },
   predictionSummary: {
@@ -1047,12 +1118,24 @@ const styles = StyleSheet.create({
   },
   predictionSummaryLabel: {
     color: "#aaa",
-    fontSize: 14,
+    fontSize: 12, // Reduced from 14
   },
   predictionSummaryValue: {
     color: "white",
-    fontSize: 18,
+    fontSize: 16, // Reduced from 18
     fontWeight: "bold",
+  },
+  predictionProgressBar: {
+    height: 10, // Reduced from 12
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderRadius: 5, // Reduced from 6
+    overflow: "hidden",
+    marginBottom: 20,
+  },
+  predictionProgressFill: {
+    height: "100%",
+    backgroundColor: "#0099ff",
+    borderRadius: 5, // Reduced from 6
   },
   predictionProgressText: {
     position: "absolute",
@@ -1062,44 +1145,101 @@ const styles = StyleSheet.create({
     bottom: 0,
     textAlign: "center",
     color: "white",
-    fontSize: 12,
+    fontSize: 10, // Reduced from 12
     fontWeight: "bold",
-    lineHeight: 12,
+    lineHeight: 10, // Reduced from 12
     textShadowColor: "rgba(0, 0, 0, 0.75)",
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 1,
   },
   chartSection: {
-    marginBottom: 20,
+    marginBottom: 15, // Reduced from 20
     backgroundColor: "rgba(0, 0, 0, 0.3)",
     borderRadius: 12,
-    padding: 10,
+    padding: 8, // Reduced from 10
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
   },
   chartSectionTitle: {
     color: "#0099ff",
-    fontSize: 18,
+    fontSize: 15, // Reduced from 16
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 8, // Kept the same
     textAlign: "center",
     textShadowColor: "rgba(0, 0, 0, 0.75)",
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
   detailsSection: {
-    marginTop: 20,
+    marginTop: 15, // Reduced from 20
   },
   detailsSectionTitle: {
     color: "white",
-    fontSize: 18,
+    fontSize: 16, // Reduced from 18
     fontWeight: "bold",
     marginBottom: 10,
     textAlign: "center",
   },
-  scrollViewContent: {
-    paddingBottom: 20,
-    flexGrow: 1,
+  predictionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8, // Reduced from 10
+  },
+  predictionLabel: {
+    color: "#aaa",
+    fontSize: 14, // Reduced from 16
+  },
+  predictionValue: {
+    color: "white",
+    fontSize: 14, // Reduced from 16
+    fontWeight: "500",
+  },
+  trainingLevelImpactContainer: {
+    backgroundColor: "rgba(0, 153, 255, 0.1)",
+    borderRadius: 8,
+    padding: 8, // Reduced from 10
+    marginTop: 8, // Reduced from 10
+    marginBottom: 8, // Reduced from 10
+    borderWidth: 1,
+    borderColor: "rgba(0, 153, 255, 0.3)",
+  },
+  trainingLevelImpactText: {
+    color: "#0099ff",
+    fontSize: 12, // Reduced from 14
+    fontStyle: "italic",
+    textAlign: "center",
+  },
+  compactCloseButton: {
+    backgroundColor: "rgba(0, 153, 255, 0.2)",
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    alignSelf: "center",
+    marginTop: 10,
+    marginBottom: 5,
+    borderWidth: 1,
+    borderColor: "rgba(0, 153, 255, 0.3)",
+  },
+  compactCloseButtonText: {
+    color: "#0099ff",
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+  emptyText: {
+    color: "white",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  emptySubtext: {
+    color: "#aaa",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  bottomPadding: {
+    height: 120, // Increased to provide more space at the bottom
   },
 })
 

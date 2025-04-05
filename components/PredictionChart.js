@@ -1,94 +1,121 @@
 "use client"
 
 import React, { useState } from "react"
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from "react-native"
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native"
 import GlassmorphicCard from "./GlassmorphicCard"
 
-const { width } = Dimensions.get("window")
-
-const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
-  // Add a new state for tracking the selected data point
+const PredictionChart = ({ current = 0, target = 0, timeToGoal = "", unit = "lbs" }) => {
+  // State for tracking the selected data point
   const [selectedPoint, setSelectedPoint] = useState(null)
 
   // Parse the time to goal to generate prediction points
   const generatePredictionData = () => {
-    const data = []
-    const today = new Date()
+    try {
+      const data = []
+      const today = new Date()
 
-    // Add current value as first point
-    data.push({
-      date: today,
-      value: current,
-      label: "Now",
-    })
-
-    // Parse the timeToGoal string to determine future points
-    const endDate = new Date(today)
-    let intervalMonths = 1
-
-    if (timeToGoal.includes("day")) {
-      const days = Number.parseInt(timeToGoal.match(/\d+/)[0])
-      endDate.setDate(today.getDate() + days)
-      intervalMonths = 0.25 // Show points every week
-    } else if (timeToGoal.includes("week")) {
-      const weeks = Number.parseInt(timeToGoal.match(/\d+/)[0])
-      endDate.setDate(today.getDate() + weeks * 7)
-      intervalMonths = 0.5 // Show points every 2 weeks
-    } else if (timeToGoal.includes("month")) {
-      const months = Number.parseInt(timeToGoal.match(/\d+/)[0])
-      endDate.setMonth(today.getMonth() + months)
-    } else if (timeToGoal.includes("year")) {
-      const years = Number.parseInt(timeToGoal.match(/\d+/)[0])
-      endDate.setFullYear(today.getFullYear() + years)
-      intervalMonths = 3 // Show points quarterly
-    } else if (timeToGoal === "Goal reached!") {
-      // If goal is already reached, just show current value
-      return data
-    }
-
-    // Calculate value increment per interval
-    const totalIntervals = Math.max(Math.ceil((endDate - today) / (1000 * 60 * 60 * 24 * 30 * intervalMonths)), 1)
-    const valueIncrement = (target - current) / totalIntervals
-
-    // Generate intermediate points
-    for (let i = 1; i < totalIntervals; i++) {
-      const pointDate = new Date(today)
-      pointDate.setMonth(today.getMonth() + i * intervalMonths)
-
+      // Add current value as first point
       data.push({
-        date: pointDate,
-        value: current + valueIncrement * i,
-        label: formatDate(pointDate),
+        date: today,
+        value: current,
+        label: "Now",
       })
+
+      // Parse the timeToGoal string to determine future points
+      const endDate = new Date(today)
+      let intervalMonths = 1
+
+      if (timeToGoal && typeof timeToGoal === "string") {
+        if (timeToGoal.includes("day")) {
+          const days = Number.parseInt(timeToGoal.match(/\d+/)?.[0] || "7", 10)
+          endDate.setDate(today.getDate() + days)
+          intervalMonths = 0.25 // Show points every week
+        } else if (timeToGoal.includes("week")) {
+          const weeks = Number.parseInt(timeToGoal.match(/\d+/)?.[0] || "4", 10)
+          endDate.setDate(today.getDate() + weeks * 7)
+          intervalMonths = 0.5 // Show points every 2 weeks
+        } else if (timeToGoal.includes("month")) {
+          const months = Number.parseInt(timeToGoal.match(/\d+/)?.[0] || "3", 10)
+          endDate.setMonth(today.getMonth() + months)
+        } else if (timeToGoal.includes("year")) {
+          const years = Number.parseInt(timeToGoal.match(/\d+/)?.[0] || "1", 10)
+          endDate.setFullYear(today.getFullYear() + years)
+          intervalMonths = 3 // Show points quarterly
+        } else if (timeToGoal === "Goal reached!") {
+          // If goal is already reached, just show current value
+          return data
+        }
+      } else {
+        // Default to 3 months if timeToGoal is invalid
+        endDate.setMonth(today.getMonth() + 3)
+      }
+
+      // Calculate value increment per interval
+      const totalIntervals = Math.max(Math.ceil((endDate - today) / (1000 * 60 * 60 * 24 * 30 * intervalMonths)), 1)
+      const valueIncrement = (target - current) / totalIntervals
+
+      // Generate intermediate points
+      for (let i = 1; i < totalIntervals; i++) {
+        const pointDate = new Date(today)
+        pointDate.setMonth(today.getMonth() + i * intervalMonths)
+
+        data.push({
+          date: pointDate,
+          value: current + valueIncrement * i,
+          label: formatDate(pointDate),
+        })
+      }
+
+      // Add target as final point
+      data.push({
+        date: endDate,
+        value: target,
+        label: "Goal",
+      })
+
+      return data
+    } catch (error) {
+      console.error("Error generating prediction data:", error)
+      // Return minimal fallback data
+      const endDate = new Date()
+      endDate.setMonth(endDate.getMonth() + 3)
+
+      return [
+        {
+          date: new Date(),
+          value: current,
+          label: "Now",
+        },
+        {
+          date: endDate,
+          value: target,
+          label: "Goal",
+        },
+      ]
     }
-
-    // Add target as final point
-    data.push({
-      date: endDate,
-      value: target,
-      label: "Goal",
-    })
-
-    return data
   }
 
   const formatDate = (date) => {
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
+      return "Invalid date"
+    }
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
   }
 
   const predictionData = generatePredictionData()
 
   // Calculate chart dimensions
-  const chartWidth = width - 80
+  const chartWidth = 300 // Fixed width
   const chartHeight = 180
   const barWidth = chartWidth / (predictionData.length - 1)
 
   // Calculate Y-axis scale
-  const maxValue = Math.max(...predictionData.map((item) => item.value)) * 1.1 // Add 10% margin
+  const maxValue = Math.max(...predictionData.map((item) => item.value || 0)) * 1.1 // Add 10% margin
   const yScale = chartHeight / maxValue
 
   // Calculate progress
-  const progress = Math.min(((current - predictionData[0].value) / (target - predictionData[0].value)) * 100, 100)
+  const progress =
+    Math.min(((current - (predictionData[0]?.value || 0)) / (target - (predictionData[0]?.value || 1))) * 100, 100) || 0
   const predictionDetails = {
     progress: progress > 0 ? progress : 0,
   }
@@ -97,7 +124,7 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
     <GlassmorphicCard style={styles.container}>
       <Text style={styles.title}>Projected Progress</Text>
 
-      {/* Update the progress bar to simplify the percentage display */}
+      {/* Progress bar */}
       <View style={styles.predictionProgressBar}>
         <View style={[styles.predictionProgressFill, { width: `${predictionDetails.progress}%` }]} />
         <Text style={styles.predictionProgressText}>{predictionDetails.progress.toFixed(1)}%</Text>
@@ -120,20 +147,22 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
 
           {/* Data points and connecting lines */}
           {predictionData.map((point, index) => {
-            if (index === 0) return null // Skip first point for lines
+            if (index === 0) return null
 
             const prevPoint = predictionData[index - 1]
+            if (!prevPoint) return null
+
             const x1 = (index - 1) * barWidth
-            const y1 = chartHeight - prevPoint.value * yScale
+            const y1 = chartHeight - (prevPoint.value || 0) * yScale
             const x2 = index * barWidth
-            const y2 = chartHeight - point.value * yScale
+            const y2 = chartHeight - (point.value || 0) * yScale
 
             // Calculate line angle
             const angle = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI
             const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2))
 
             return (
-              <React.Fragment key={index}>
+              <React.Fragment key={`line-${index}`}>
                 {/* Line connecting points */}
                 <View
                   style={[
@@ -149,8 +178,9 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
                   ]}
                 />
 
-                {/* Data point - use simple TouchableOpacity without animations */}
+                {/* Data point */}
                 <TouchableOpacity
+                  key={`point-${index}`}
                   onPress={() => setSelectedPoint(index)}
                   style={{
                     position: "absolute",
@@ -182,7 +212,7 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
                   {selectedPoint === index && (
                     <View style={styles.weightBubble}>
                       <Text style={styles.weightText}>
-                        {Math.round(point.value)} {unit}
+                        {Math.round(point.value || 0)} {unit}
                       </Text>
                     </View>
                   )}
@@ -191,39 +221,41 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
             )
           })}
 
-          {/* First data point - also simplified */}
-          <TouchableOpacity
-            onPress={() => setSelectedPoint(-1)}
-            style={{
-              position: "absolute",
-              left: -15,
-              top: chartHeight - predictionData[0].value * yScale - 15,
-              width: 30,
-              height: 30,
-              justifyContent: "center",
-              alignItems: "center",
-              zIndex: 10,
-            }}
-          >
-            <View
-              style={[
-                styles.dataPoint,
-                {
-                  borderColor: "#0099ff",
-                  backgroundColor: selectedPoint === -1 ? "#0099ff" : "black",
-                },
-              ]}
-            />
+          {/* First data point */}
+          {predictionData.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSelectedPoint(-1)}
+              style={{
+                position: "absolute",
+                left: -15,
+                top: chartHeight - (predictionData[0]?.value || 0) * yScale - 15,
+                width: 30,
+                height: 30,
+                justifyContent: "center",
+                alignItems: "center",
+                zIndex: 10,
+              }}
+            >
+              <View
+                style={[
+                  styles.dataPoint,
+                  {
+                    borderColor: "#0099ff",
+                    backgroundColor: selectedPoint === -1 ? "#0099ff" : "black",
+                  },
+                ]}
+              />
 
-            {/* Show weight value when first point is selected */}
-            {selectedPoint === -1 && (
-              <View style={styles.weightBubble}>
-                <Text style={styles.weightText}>
-                  {Math.round(predictionData[0].value)} {unit}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+              {/* Show weight value when first point is selected */}
+              {selectedPoint === -1 && predictionData[0] && (
+                <View style={styles.weightBubble}>
+                  <Text style={styles.weightText}>
+                    {Math.round(predictionData[0].value || 0)} {unit}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -231,7 +263,7 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
       <View style={styles.xAxis}>
         {predictionData.map((point, index) => (
           <Text
-            key={index}
+            key={`label-${index}`}
             style={[
               styles.xAxisLabel,
               {
@@ -242,7 +274,7 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
               },
             ]}
           >
-            {point.label}
+            {point.label || ""}
           </Text>
         ))}
       </View>
@@ -257,22 +289,21 @@ const PredictionChart = ({ current, target, timeToGoal, unit = "lbs" }) => {
   )
 }
 
-// Update the styles to remove unused styles
 const styles = StyleSheet.create({
   container: {
-    padding: 15,
+    padding: Platform.OS === "ios" ? 10 : 15,
     marginBottom: 15,
   },
   title: {
     color: "white",
-    fontSize: 16,
+    fontSize: Platform.OS === "ios" ? 14 : 16,
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 8,
   },
   chartContainer: {
     flexDirection: "row",
-    height: 150,
-    marginBottom: 20,
+    height: Platform.OS === "ios" ? 120 : 150,
+    marginBottom: 15,
   },
   yAxis: {
     width: 25,
@@ -308,11 +339,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 2,
   },
-  valueLabel: {
-    position: "absolute",
-    fontSize: 9,
-    fontWeight: "bold",
-  },
   xAxis: {
     height: 20,
     position: "relative",
@@ -337,7 +363,7 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
   },
   predictionProgressBar: {
-    height: 20,
+    height: Platform.OS === "ios" ? 15 : 20,
     width: "100%",
     backgroundColor: "rgba(0, 0, 0, 0.3)",
     borderRadius: 10,
@@ -362,14 +388,6 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0, 0, 0, 0.75)",
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 1,
-  },
-  dataPointTouchable: {
-    position: "absolute",
-    width: 30,
-    height: 30,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 10,
   },
   weightBubble: {
     position: "absolute",

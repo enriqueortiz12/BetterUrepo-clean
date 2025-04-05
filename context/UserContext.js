@@ -24,6 +24,8 @@ export const UserProvider = ({ children }) => {
   useEffect(() => {
     const loadUserData = async () => {
       try {
+        setIsLoading(true)
+
         // Load profile
         const profileData = await AsyncStorage.getItem("userProfile")
         if (profileData) {
@@ -32,15 +34,41 @@ export const UserProvider = ({ children }) => {
 
         // Load PRs
         const prData = await AsyncStorage.getItem("personalRecords")
+        console.log("Raw PR data from storage:", prData)
+
         if (prData) {
-          setPersonalRecords(JSON.parse(prData))
+          try {
+            const parsedData = JSON.parse(prData)
+            console.log("Parsed PR data:", parsedData)
+
+            if (Array.isArray(parsedData) && parsedData.length > 0) {
+              setPersonalRecords(parsedData)
+            } else {
+              console.log("PR data is empty or not an array, initializing with defaults")
+              setPersonalRecords(initialPRs)
+              await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
+            }
+          } catch (parseError) {
+            console.error("Error parsing PR data:", parseError)
+            setPersonalRecords(initialPRs)
+            await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
+          }
         } else {
           // Initialize with default PRs if none exist
+          console.log("No PR data found, initializing with defaults:", initialPRs)
           setPersonalRecords(initialPRs)
           await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
         }
       } catch (error) {
         console.error("Error loading user data:", error)
+        // Initialize with default PRs on error
+        console.log("Error loading data, initializing with defaults")
+        setPersonalRecords(initialPRs)
+        try {
+          await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
+        } catch (storageError) {
+          console.error("Error saving initial PRs:", storageError)
+        }
       } finally {
         setIsLoading(false)
       }
@@ -72,6 +100,9 @@ export const UserProvider = ({ children }) => {
       }
 
       const updatedPRs = [...personalRecords, prWithId]
+      console.log("Adding new PR:", prWithId)
+      console.log("Updated PRs:", updatedPRs)
+
       setPersonalRecords(updatedPRs)
       await AsyncStorage.setItem("personalRecords", JSON.stringify(updatedPRs))
       return { success: true }
@@ -108,21 +139,30 @@ export const UserProvider = ({ children }) => {
     }
   }
 
-  return (
-    <UserContext.Provider
-      value={{
-        userProfile,
-        updateProfile,
-        personalRecords,
-        addPersonalRecord,
-        updatePersonalRecord,
-        deletePersonalRecord,
-        isLoading,
-      }}
-    >
-      {children}
-    </UserContext.Provider>
-  )
+  // Reset PRs to initial data (for debugging)
+  const resetPersonalRecords = async () => {
+    try {
+      setPersonalRecords(initialPRs)
+      await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
+      return { success: true }
+    } catch (error) {
+      console.error("Error resetting PRs:", error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  const contextValue = {
+    userProfile,
+    updateProfile,
+    personalRecords,
+    addPersonalRecord,
+    updatePersonalRecord,
+    deletePersonalRecord,
+    resetPersonalRecords,
+    isLoading,
+  }
+
+  return <UserContext.Provider value={contextValue}>{children}</UserContext.Provider>
 }
 
 export const useUser = () => useContext(UserContext)

@@ -1,14 +1,16 @@
 "use client"
-import { useState, useEffect } from "react"
+
+import React from "react"
 import { NavigationContainer } from "@react-navigation/native"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { View, Text, StyleSheet, ActivityIndicator, Image, Platform, Dimensions } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
+import { supabase } from "./lib/supabase"
 
 // Import context providers and hooks
 import { AuthProvider, useAuth } from "./context/AuthContext"
-import { UserProvider, useUser } from "./context/UserContext"
+import { UserProvider } from "./context/UserContext"
 import { TrainerProvider } from "./context/TrainerContext"
 
 // Auth Screens
@@ -46,13 +48,13 @@ const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 const Stack = createNativeStackNavigator()
 const Tab = createBottomTabNavigator()
 
-// Main tab navigator
+// Update the tab bar style to make it more compact and not push content up
 const MainTabs = () => {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
-          let iconName
+          let iconName = "help-circle-outline" // Default fallback
 
           if (route.name === "HomeTab") {
             iconName = focused ? "home" : "home-outline"
@@ -68,6 +70,7 @@ const MainTabs = () => {
             iconName = focused ? "list" : "list-outline"
           }
 
+          // Always return a valid component
           return <Ionicons name={iconName} size={size} color={color} />
         },
         tabBarActiveTintColor: "#0099ff",
@@ -76,18 +79,14 @@ const MainTabs = () => {
           backgroundColor: "#121212",
           borderTopColor: "rgba(255, 255, 255, 0.1)",
           paddingTop: 5,
-          paddingBottom: Platform.OS === "ios" ? (isIphoneX ? 30 : 5) : 5,
-          height: Platform.OS === "ios" ? (isIphoneX ? 90 : 60) : 60,
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
+          paddingBottom: Platform.OS === "ios" ? (isIphoneX ? 25 : 5) : 5,
+          height: Platform.OS === "ios" ? (isIphoneX ? 80 : 60) : 60,
+          position: "absolute", // Make tab bar float over content
           elevation: 8,
           shadowColor: "#000",
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
           shadowRadius: 2,
-          zIndex: 999, // Ensure tab bar is above other elements
         },
         tabBarLabelStyle: {
           fontSize: 12,
@@ -109,10 +108,13 @@ const MainTabs = () => {
 
 // Initial loading component
 const InitialLoading = () => {
+  // Define the logo source directly
+  const logoSource = require("./assets/logo.png")
+
   return (
     <View style={styles.loadingContainer}>
       <View style={styles.logoContainer}>
-        <Image source={require("./assets/logo.png")} style={styles.logo} resizeMode="contain" />
+        <Image source={logoSource} style={styles.logo} resizeMode="contain" />
       </View>
       <ActivityIndicator size="large" color="#0099ff" />
       <Text style={styles.loadingText}>Loading BetterU...</Text>
@@ -120,14 +122,126 @@ const InitialLoading = () => {
   )
 }
 
+// This component will be rendered inside NavigationContainer
+const MainNavigator = () => {
+  const { user, loading: authLoading } = useAuth()
+  const [initialRoute, setInitialRoute] = React.useState(null)
+  const [isChecking, setIsChecking] = React.useState(true)
+
+  // Function to handle direct navigation without using hooks
+  const handleDirectNavigation = (screen, params = {}) => {
+    setInitialRoute(screen)
+    setIsChecking(false)
+  }
+
+  // Check if we need to redirect to onboarding
+  const checkProfileCompleteness = React.useCallback(async () => {
+    if (user) {
+      try {
+        const { data, error } = await supabase.from("profiles").select("*").eq("user_id", user.id).single()
+
+        if (error && error.code !== "PGRST116") {
+          console.error("Error checking profile:", error)
+          return false
+        }
+
+        // Check if profile is incomplete
+        const isProfileIncomplete =
+          !data || !data.full_name || !data.age || !data.weight || !data.fitness_goal || !data.gender || !data.height
+
+        return isProfileIncomplete
+      } catch (error) {
+        console.error("Error in profile check:", error)
+        return false
+      }
+    }
+    return false
+  }, [user])
+
+  React.useEffect(() => {
+    const determineInitialRoute = async () => {
+      if (!user) {
+        console.log("No user, setting initial route to Login")
+        setInitialRoute("Login")
+        setIsChecking(false)
+        return
+      }
+
+      try {
+        const needsOnboarding = await checkProfileCompleteness()
+        console.log("Profile completeness check result:", needsOnboarding)
+
+        if (needsOnboarding) {
+          console.log("Profile incomplete, setting initial route to Onboarding")
+          setInitialRoute("Onboarding")
+        } else {
+          console.log("Profile complete, setting initial route to Main")
+          setInitialRoute("Main")
+        }
+      } catch (error) {
+        console.error("Error determining initial route:", error)
+        // Default to Main on error
+        setInitialRoute("Main")
+      } finally {
+        setIsChecking(false)
+      }
+    }
+
+    if (!authLoading) {
+      determineInitialRoute()
+    }
+  }, [user, authLoading, checkProfileCompleteness])
+
+  if (authLoading || isChecking) {
+    return (
+      <LoadingScreen
+        directNavigation={handleDirectNavigation}
+        nextScreen={user ? "Main" : "Login"}
+        nextScreenParams={{}}
+      />
+    )
+  }
+
+  return (
+    <Stack.Navigator
+      initialRouteName={initialRoute}
+      screenOptions={{
+        headerShown: false,
+        cardStyle: { backgroundColor: "black" },
+        animation: "slide_from_right",
+      }}
+    >
+      {user ? (
+        // Authenticated routes
+        <>
+          <Stack.Screen name="Main" component={MainTabs} />
+          <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ gestureEnabled: false }} />
+          <Stack.Screen name="Goals" component={GoalsScreen} />
+          <Stack.Screen name="Loading" component={LoadingScreen} />
+          <Stack.Screen name="FormAnalysisSelection" component={FormAnalysisSelectionScreen} />
+          <Stack.Screen name="WorkoutAnalysis" component={WorkoutAnalysisScreen} />
+          <Stack.Screen name="WorkoutRecommendation" component={WorkoutRecommendationScreen} />
+          <Stack.Screen name="ActiveWorkout" component={ActiveWorkoutScreen} />
+        </>
+      ) : (
+        // Unauthenticated routes
+        <>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="SignUp" component={SignUpScreen} />
+          <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+          <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+        </>
+      )}
+    </Stack.Navigator>
+  )
+}
+
 // Navigation component that handles auth state
 const AppNavigator = () => {
-  const { user, loading: authLoading } = useAuth()
-  const { isLoading: userLoading } = useUser()
-  const [initialLoading, setInitialLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = React.useState(true)
 
   // Simulate initial app loading
-  useEffect(() => {
+  React.useEffect(() => {
     const timer = setTimeout(() => {
       setInitialLoading(false)
     }, 2000)
@@ -139,42 +253,9 @@ const AppNavigator = () => {
     return <InitialLoading />
   }
 
-  if (authLoading || userLoading) {
-    // Pass explicit params to LoadingScreen
-    return <LoadingScreen nextScreen={user ? "Main" : "Login"} nextScreenParams={{}} />
-  }
-
   return (
     <NavigationContainer>
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: false,
-          cardStyle: { backgroundColor: "black" },
-          animation: "slide_from_right",
-        }}
-      >
-        {user ? (
-          // Authenticated routes
-          <>
-            <Stack.Screen name="Main" component={MainTabs} />
-            <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ gestureEnabled: false }} />
-            <Stack.Screen name="Goals" component={GoalsScreen} />
-            <Stack.Screen name="Loading" component={LoadingScreen} />
-            <Stack.Screen name="FormAnalysisSelection" component={FormAnalysisSelectionScreen} />
-            <Stack.Screen name="WorkoutAnalysis" component={WorkoutAnalysisScreen} />
-            <Stack.Screen name="WorkoutRecommendation" component={WorkoutRecommendationScreen} />
-            <Stack.Screen name="ActiveWorkout" component={ActiveWorkoutScreen} />
-          </>
-        ) : (
-          // Unauthenticated routes
-          <>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="SignUp" component={SignUpScreen} />
-            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
-            <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
-          </>
-        )}
-      </Stack.Navigator>
+      <MainNavigator />
     </NavigationContainer>
   )
 }
@@ -192,39 +273,24 @@ const App = () => {
   )
 }
 
-// Styles
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: "black",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#121212",
   },
   logoContainer: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: "transparent", // Changed from black to transparent
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 30,
-    borderWidth: 2,
-    borderColor: "#0099ff",
-    shadowColor: "#0099ff",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 10,
-    elevation: 10,
+    marginBottom: 20,
   },
   logo: {
-    width: 130,
-    height: 130,
+    width: 200,
+    height: 200,
   },
   loadingText: {
-    color: "#0099ff", // Changed to match logo color
-    marginTop: 20,
-    fontSize: 18,
-    fontWeight: "bold",
+    marginTop: 10,
+    fontSize: 16,
+    color: "#fff",
   },
 })
 

@@ -553,7 +553,7 @@ const styles = StyleSheet.create({
   workoutsList: {
     padding: 20,
     paddingTop: 0,
-    paddingBottom: Platform && Platform.OS === "ios" ? 120 : 100, // Extra padding at bottom for iOS
+    paddingBottom: 20, // Reduced padding since tab bar now pushes content up
   },
   workoutCard: {
     marginBottom: 15,

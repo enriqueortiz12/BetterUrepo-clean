@@ -3,21 +3,26 @@
 import { useState, useRef, useEffect } from "react"
 import { Pressable, Animated, StyleSheet, Text, View, Platform } from "react-native"
 
-const HoverButton = ({
-  onPress,
-  style,
-  textStyle,
-  children,
-  text,
-  icon,
-  disabled = false,
-  activeOpacity = 0.7,
-  hoverColor,
-  pressColor,
-  ...props
-}) => {
+const HoverButton = (props) => {
+  // Destructure props with safe defaults
+  const {
+    onPress = () => {},
+    style = {},
+    textStyle = {},
+    children = null,
+    text = "",
+    icon = null,
+    disabled = false,
+    activeOpacity = 0.7,
+    hoverColor = undefined,
+    pressColor = undefined,
+    ...otherProps
+  } = props || {}
+
+  // Use React.useState instead of useState directly
   const [isPressed, setIsPressed] = useState(false)
-  // We'll only use this for web, not for native platforms
+
+  // Create animated value for opacity
   const animatedOpacity = useRef(new Animated.Value(1)).current
   const isMounted = useRef(true)
 
@@ -29,6 +34,8 @@ const HoverButton = ({
   }, [])
 
   const handlePressIn = () => {
+    if (disabled) return
+
     setIsPressed(true)
 
     // Only animate on web to avoid native driver issues
@@ -42,6 +49,8 @@ const HoverButton = ({
   }
 
   const handlePressOut = () => {
+    if (disabled) return
+
     setIsPressed(false)
 
     // Only animate on web to avoid native driver issues
@@ -58,12 +67,17 @@ const HoverButton = ({
   const handlePress = () => {
     if (disabled || !onPress) return
 
-    // Add a small delay to prevent accidental double taps
-    setTimeout(() => {
-      if (isMounted.current) {
-        onPress()
-      }
-    }, 10)
+    // Remove the delay on iOS for better responsiveness
+    if (Platform.OS === "ios") {
+      onPress()
+    } else {
+      // Keep a small delay on Android to prevent accidental double taps
+      setTimeout(() => {
+        if (isMounted.current) {
+          onPress()
+        }
+      }, 10)
+    }
   }
 
   // Determine background color based on state
@@ -80,6 +94,27 @@ const HoverButton = ({
     return {}
   }
 
+  // Render content based on props
+  const renderContent = () => {
+    // If children are provided, render them
+    if (children) {
+      return children
+    }
+
+    // Otherwise, render text and/or icon
+    return (
+      <View style={styles.content}>
+        {icon && <View style={styles.iconContainer}>{icon}</View>}
+        {text ? (
+          <Text style={[styles.text, textStyle]} numberOfLines={1}>
+            {text}
+          </Text>
+        ) : null}
+      </View>
+    )
+  }
+
+  // Return the Pressable component
   return (
     <Pressable
       onPress={disabled ? null : handlePress}
@@ -98,17 +133,10 @@ const HoverButton = ({
         },
       ]}
       hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }} // Increase touch target
-      {...props}
+      disabled={disabled}
+      {...otherProps}
     >
-      <View style={styles.content}>
-        {icon && <View style={styles.iconContainer}>{icon}</View>}
-        {text && (
-          <Text style={[styles.text, textStyle]} numberOfLines={1}>
-            {text}
-          </Text>
-        )}
-        {children}
-      </View>
+      {renderContent()}
     </Pressable>
   )
 }

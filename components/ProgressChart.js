@@ -1,66 +1,93 @@
 "use client"
 
 import React, { useState } from "react"
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from "react-native"
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native"
 import GlassmorphicCard from "./GlassmorphicCard"
 
-const { width } = Dimensions.get("window")
-
-const ProgressChart = ({ current, target, history = [], unit = "lbs", color = "#0099ff" }) => {
-  // Add a new state for tracking the selected data point
+const ProgressChart = ({ current = 0, target = 0, history = [], unit = "lbs", color = "#0099ff" }) => {
+  // State for tracking the selected data point
   const [selectedPoint, setSelectedPoint] = useState(null)
 
   // Calculate progress percentage
-  const progressPercentage = Math.min((current / target) * 100, 100)
+  const progressPercentage = Math.min((current / target) * 100, 100) || 0
   const formattedPercentage = `${progressPercentage.toFixed(1)}%`
 
   // Format dates for display
   const formatDate = (dateString) => {
-    const date = new Date(dateString)
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    try {
+      const date = new Date(dateString)
+      if (isNaN(date.getTime())) {
+        return "Invalid date"
+      }
+      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    } catch (error) {
+      return "Invalid date"
+    }
   }
 
   // Get the last 5 history points or generate placeholder data if not enough history
   const getChartData = () => {
-    if (history.length >= 2) {
-      // Sort by date (oldest first)
-      return [...history].sort((a, b) => new Date(a.date) - new Date(b.date)).slice(-5)
-    } else {
-      // Generate placeholder data based on current value
-      const today = new Date()
-      const placeholderData = []
+    try {
+      if (history && Array.isArray(history) && history.length >= 2) {
+        // Sort by date (oldest first)
+        return [...history]
+          .sort((a, b) => {
+            const dateA = new Date(a.date || 0)
+            const dateB = new Date(b.date || 0)
+            return dateA - dateB
+          })
+          .slice(-5)
+      } else {
+        // Generate placeholder data based on current value
+        const today = new Date()
+        const placeholderData = []
 
-      // Current value as the latest point
-      placeholderData.push({
-        date: today.toISOString().split("T")[0],
-        value: current,
-      })
-
-      // Generate 4 previous points with decreasing values
-      for (let i = 1; i <= 4; i++) {
-        const prevDate = new Date(today)
-        prevDate.setDate(today.getDate() - i * 15) // Every 15 days back
-
-        // Calculate a value that's lower than current (simulating progress)
-        const prevValue = Math.max(current * (1 - i * 0.05), current * 0.8)
-
-        placeholderData.unshift({
-          date: prevDate.toISOString().split("T")[0],
-          value: Math.round(prevValue),
+        // Current value as the latest point
+        placeholderData.push({
+          date: today.toISOString().split("T")[0],
+          value: current,
         })
-      }
 
-      return placeholderData
+        // Generate 4 previous points with decreasing values
+        for (let i = 1; i <= 4; i++) {
+          const prevDate = new Date(today)
+          prevDate.setDate(today.getDate() - i * 15) // Every 15 days back
+
+          // Calculate a value that's lower than current (simulating progress)
+          const prevValue = Math.max(current * (1 - i * 0.05), current * 0.8)
+
+          placeholderData.unshift({
+            date: prevDate.toISOString().split("T")[0],
+            value: Math.round(prevValue),
+          })
+        }
+
+        return placeholderData
+      }
+    } catch (error) {
+      console.error("Error generating chart data:", error)
+      // Return minimal fallback data
+      const today = new Date()
+      return [
+        {
+          date: new Date(today.setDate(today.getDate() - 30)).toISOString().split("T")[0],
+          value: current * 0.9,
+        },
+        {
+          date: today.toISOString().split("T")[0],
+          value: current,
+        },
+      ]
     }
   }
 
   const chartData = getChartData()
 
   // Calculate the highest value for the Y-axis scale
-  const maxValue = Math.max(target, ...chartData.map((item) => item.value))
+  const maxValue = Math.max(target, ...chartData.map((item) => item.value || 0))
 
   // Calculate chart dimensions
-  const chartWidth = width - 80 // Accounting for padding
+  const chartWidth = 300 // Fixed width
   const chartHeight = 150
   const barWidth = chartWidth / (chartData.length - 1)
 
@@ -111,17 +138,19 @@ const ProgressChart = ({ current, target, history = [], unit = "lbs", color = "#
             if (index === 0) return null
 
             const prevPoint = chartData[index - 1]
+            if (!prevPoint) return null
+
             const x1 = (index - 1) * barWidth
-            const y1 = chartHeight - prevPoint.value * yScale
+            const y1 = chartHeight - (prevPoint.value || 0) * yScale
             const x2 = index * barWidth
-            const y2 = chartHeight - point.value * yScale
+            const y2 = chartHeight - (point.value || 0) * yScale
 
             // Calculate line angle
             const angle = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI
             const length = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2))
 
             return (
-              <React.Fragment key={index}>
+              <React.Fragment key={`line-${index}`}>
                 {/* Line connecting points */}
                 <View
                   style={[
@@ -137,8 +166,9 @@ const ProgressChart = ({ current, target, history = [], unit = "lbs", color = "#
                   ]}
                 />
 
-                {/* Data point - use simple TouchableOpacity without animations */}
+                {/* Data point */}
                 <TouchableOpacity
+                  key={`point-${index}`}
                   onPress={() => setSelectedPoint(index)}
                   style={{
                     position: "absolute",
@@ -174,39 +204,41 @@ const ProgressChart = ({ current, target, history = [], unit = "lbs", color = "#
             )
           })}
 
-          {/* First data point - also simplified */}
-          <TouchableOpacity
-            onPress={() => setSelectedPoint(-1)}
-            style={{
-              position: "absolute",
-              left: -15,
-              top: chartHeight - chartData[0].value * yScale - 15,
-              width: 30,
-              height: 30,
-              justifyContent: "center",
-              alignItems: "center",
-              zIndex: 10,
-            }}
-          >
-            <View
-              style={[
-                styles.dataPoint,
-                {
-                  borderColor: color,
-                  backgroundColor: selectedPoint === -1 ? color : "black",
-                },
-              ]}
-            />
+          {/* First data point */}
+          {chartData.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSelectedPoint(-1)}
+              style={{
+                position: "absolute",
+                left: -15,
+                top: chartHeight - (chartData[0]?.value || 0) * yScale - 15,
+                width: 30,
+                height: 30,
+                justifyContent: "center",
+                alignItems: "center",
+                zIndex: 10,
+              }}
+            >
+              <View
+                style={[
+                  styles.dataPoint,
+                  {
+                    borderColor: color,
+                    backgroundColor: selectedPoint === -1 ? color : "black",
+                  },
+                ]}
+              />
 
-            {/* Show weight value when first point is selected */}
-            {selectedPoint === -1 && (
-              <View style={styles.weightBubble}>
-                <Text style={styles.weightText}>
-                  {chartData[0].value} {unit}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+              {/* Show weight value when first point is selected */}
+              {selectedPoint === -1 && chartData[0] && (
+                <View style={styles.weightBubble}>
+                  <Text style={styles.weightText}>
+                    {chartData[0].value} {unit}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -214,7 +246,7 @@ const ProgressChart = ({ current, target, history = [], unit = "lbs", color = "#
       <View style={styles.xAxis}>
         {chartData.map((point, index) => (
           <Text
-            key={index}
+            key={`label-${index}`}
             style={[
               styles.xAxisLabel,
               {
@@ -244,17 +276,16 @@ const ProgressChart = ({ current, target, history = [], unit = "lbs", color = "#
   )
 }
 
-// Update the styles to add new styles for interactive elements
 const styles = StyleSheet.create({
   container: {
-    padding: 15,
+    padding: Platform.OS === "ios" ? 10 : 15,
     marginBottom: 15,
   },
   title: {
     color: "white",
-    fontSize: 16,
+    fontSize: Platform.OS === "ios" ? 14 : 16,
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 8,
   },
   targetContainer: {
     flexDirection: "row",
@@ -270,50 +301,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   progressBarContainer: {
-    height: 16,
+    height: Platform.OS === "ios" ? 12 : 16,
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 8,
-    marginBottom: 20,
+    marginBottom: 15,
     position: "relative",
   },
   progressBar: {
     height: "100%",
     borderRadius: 8,
   },
-  targetMarker: {
-    position: "absolute",
-    top: -20,
-    width: 2,
-    height: 36,
-    backgroundColor: "#FF5733",
-    transform: [{ translateX: -1 }],
-  },
-  targetMarkerText: {
-    position: "absolute",
-    top: -20,
-    left: -10,
-    color: "#FF5733",
-    fontSize: 10,
-  },
-  currentMarker: {
-    position: "absolute",
-    top: -12,
-    width: 2,
-    height: 28,
-    backgroundColor: "#0099ff",
-    transform: [{ translateX: -1 }],
-  },
-  currentMarkerText: {
-    position: "absolute",
-    bottom: -18,
-    left: -10,
-    color: "#0099ff",
-    fontSize: 10,
-  },
   chartContainer: {
     flexDirection: "row",
-    height: 120,
-    marginBottom: 20,
+    height: Platform.OS === "ios" ? 120 : 150,
+    marginBottom: 15,
   },
   yAxis: {
     width: 25,
@@ -400,14 +401,6 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0, 0, 0, 0.75)",
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 1,
-  },
-  dataPointTouchable: {
-    position: "absolute",
-    width: 30,
-    height: 30,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 10,
   },
   weightBubble: {
     position: "absolute",

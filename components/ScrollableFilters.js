@@ -1,25 +1,54 @@
-"use client"
-import { Text, StyleSheet, ScrollView } from "react-native"
+import { Text, StyleSheet, ScrollView, Platform, Dimensions, View, TouchableOpacity } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import HoverButton from "./HoverButton"
 
-const ScrollableFilters = ({ options, selectedValue, onSelect, icon = "chevron-down" }) => {
+// Get screen dimensions for responsive design
+const { width, height } = Dimensions.get("window")
+const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
+
+const ScrollableFilters = (props) => {
+  // Ensure all props have default values
+  const { options = [], selectedValue = "", onSelect = () => {}, icon } = props || {}
+
+  // Ensure options is an array
+  const safeOptions = Array.isArray(options) ? options : []
+
+  // Render nothing if no options
+  if (safeOptions.length === 0) {
+    return <View style={styles.container} />
+  }
+
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.container}>
-      {options.map((option) => (
-        <HoverButton
-          key={option.value}
-          style={[styles.filterButton, selectedValue === option.value && styles.selectedFilterButton]}
-          onPress={() => onSelect(option.value)}
-          activeOpacity={0.7}
-          hoverColor={selectedValue === option.value ? "cyan" : "rgba(255, 255, 255, 0.2)"}
-        >
-          <Text style={[styles.filterText, selectedValue === option.value && styles.selectedFilterText]}>
-            {option.label}
-          </Text>
-          {icon && <Ionicons name={icon} size={16} color={selectedValue === option.value ? "black" : "white"} />}
-        </HoverButton>
-      ))}
+      {safeOptions.map((option, index) => {
+        // Skip rendering if option is invalid
+        if (!option || typeof option !== "object") return null
+
+        // Extract values with defaults
+        const label = option.label || `Option ${index}`
+        const value = option.value !== undefined ? option.value : ""
+        const isSelected = selectedValue === value
+
+        // Create a unique key
+        const key = `filter-${index}-${String(value).replace(/\s+/g, "-")}`
+
+        return (
+          <TouchableOpacity
+            key={key}
+            style={[styles.filterButton, isSelected && styles.selectedFilterButton]}
+            onPress={() => onSelect(value)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.filterText, isSelected && styles.selectedFilterText]}>{label}</Text>
+            {icon && (
+              <Ionicons
+                name={typeof icon === "string" ? icon : "chevron-down"}
+                size={16}
+                color={isSelected ? "black" : "white"}
+              />
+            )}
+          </TouchableOpacity>
+        )
+      })}
     </ScrollView>
   )
 }
@@ -27,6 +56,7 @@ const ScrollableFilters = ({ options, selectedValue, onSelect, icon = "chevron-d
 const styles = StyleSheet.create({
   container: {
     paddingRight: 20,
+    paddingVertical: Platform.OS === "ios" ? 5 : 0,
   },
   filterButton: {
     flexDirection: "row",
@@ -34,13 +64,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 25,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "ios" ? 6 : 8,
+    paddingHorizontal: Platform.OS === "ios" ? 10 : 12,
     marginRight: 8,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.2)",
-    minHeight: 36,
-    minWidth: 80,
+    minHeight: Platform.OS === "ios" ? 32 : 36,
+    minWidth: Platform.OS === "ios" ? 70 : 80,
   },
   selectedFilterButton: {
     backgroundColor: "cyan",
@@ -53,7 +83,7 @@ const styles = StyleSheet.create({
   },
   filterText: {
     color: "white",
-    fontSize: 13,
+    fontSize: Platform.OS === "ios" ? 12 : 13,
     marginRight: 5,
     textAlign: "center",
   },

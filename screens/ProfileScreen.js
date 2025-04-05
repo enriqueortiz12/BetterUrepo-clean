@@ -1,16 +1,29 @@
 "use client"
 
-import { useState } from "react"
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, Alert } from "react-native"
+import { useState, useEffect } from "react"
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Modal,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+} from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useAuth } from "../context/AuthContext"
 import { useUser } from "../context/UserContext"
+import { supabase } from "../lib/supabase"
 
 const fitnessGoals = [
-  { id: "lose_weight", title: "Lose Weight" },
-  { id: "gain_muscle", title: "Gain Muscle" },
-  { id: "improve_fitness", title: "Improve Fitness" },
-  { id: "maintain_weight", title: "Maintain Weight" },
+  { id: "strength", title: "Strength" },
+  { id: "muscle_growth", title: "Muscle Growth" },
+  { id: "weight_loss", title: "Weight Loss" },
+  { id: "endurance", title: "Endurance" },
+  { id: "health", title: "General Health" },
+  { id: "athleticism", title: "Athleticism" },
 ]
 
 // Add training levels array
@@ -21,29 +34,158 @@ const trainingLevels = [
 ]
 
 const ProfileScreen = ({ navigation }) => {
-  const { signOut, user } = useAuth()
-  const { userProfile, updateProfile } = useUser()
+  const { signOut, user, profile, isLoading: authLoading, refetchProfile } = useAuth()
+  const { userProfile, updateProfile: updateUserContextProfile } = useUser()
   const [modalVisible, setModalVisible] = useState(false)
   const [editField, setEditField] = useState("")
   const [inputValue, setInputValue] = useState("")
   const [inputUnit, setInputUnit] = useState("")
-  const [showTrainingLevelModal, setShowTrainingLevelModal] = useState(false) // Add state for training level modal
+  const [showTrainingLevelModal, setShowTrainingLevelModal] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [profileData, setProfileData] = useState(null)
 
-  // Add function to handle training level selection
-  const handleTrainingLevelSelect = async (level) => {
-    const result = await updateProfile({ trainingLevel: level })
+  // Fetch profile data when component mounts
+  useEffect(() => {
+    if (user) {
+      fetchProfileData()
+    }
+  }, [user])
 
-    if (result.success) {
-      setShowTrainingLevelModal(false)
-    } else {
-      Alert.alert("Error", "Failed to update training level. Please try again.")
+  // Refresh profile data when the screen is focused
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", () => {
+      if (user) {
+        fetchProfileData()
+      }
+    })
+
+    return unsubscribe
+  }, [navigation, user])
+
+  // Update the fetchProfileData function with better error handling and debugging
+  const fetchProfileData = async () => {
+    try {
+      setIsLoading(true)
+
+      // Check if user is defined
+      if (!user || !user.id) {
+        console.log("No user found or user ID is missing")
+        setIsLoading(false)
+        return
+      }
+
+      console.log("Fetching profile data for user ID:", user.id)
+
+      // Refetch profile from AuthContext
+      refetchProfile && refetchProfile()
+
+      // Also fetch directly to ensure we have the latest data
+      const { data, error } = await supabase.from("profiles").select("*").eq("user_id", user.id).single()
+
+      if (error) {
+        console.error("Supabase error fetching profile data:", error)
+
+        // Check for specific error types
+        if (error.code === "PGRST116") {
+          console.log("No profile found for this user, may need to create one")
+          // Handle case where profile doesn't exist yet
+          await createInitialProfile()
+          return
+        }
+
+        Alert.alert("Error", "Failed to load profile data: " + error.message)
+      } else {
+        console.log("Profile data loaded successfully:", data)
+        setProfileData(data)
+
+        // Also update the user context profile if needed
+        if (data) {
+          updateUserContextProfile({
+            name: data.full_name,
+            email: data.email,
+            age: data.age,
+            weight: data.weight,
+            height: data.height,
+            goal: data.fitness_goal,
+            trainingLevel: data.training_level || "intermediate",
+          })
+        }
+      }
+    } catch (error) {
+      console.error("Detailed error in fetchProfileData:", error)
+      console.error("Error stack:", error.stack)
+      Alert.alert(
+        "Error",
+        "An unexpected error occurred while loading profile data. Please check your internet connection and try again.",
+      )
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  // Get the title of the selected training level
-  const getTrainingLevelTitle = () => {
-    const level = trainingLevels.find((level) => level.id === userProfile.trainingLevel)
-    return level ? level.title : "Not set"
+  // Add a function to create an initial profile if one doesn't exist
+  const createInitialProfile = async () => {
+    try {
+      if (!user || !user.id) return
+
+      console.log("Creating initial profile for user:", user.id)
+
+      const initialProfile = {
+        user_id: user.id,
+        full_name: user.email ? user.email.split("@")[0] : "New User",
+        email: user.email,
+        training_level: "intermediate",
+      }
+
+      const { data, error } = await supabase.from("profiles").insert([initialProfile]).select()
+
+      if (error) {
+        console.error("Error creating initial profile:", error)
+        Alert.alert("Error", "Failed to create profile: " + error.message)
+      } else {
+        console.log("Initial profile created:", data)
+        setProfileData(data[0])
+
+        // Update user context
+        updateUserContextProfile({
+          name: initialProfile.full_name,
+          email: initialProfile.email,
+          trainingLevel: initialProfile.training_level,
+        })
+      }
+    } catch (error) {
+      console.error("Error in createInitialProfile:", error)
+    }
+  }
+
+  // Add a function to handle training level selection
+  const handleTrainingLevelSelect = async (level) => {
+    try {
+      setIsLoading(true)
+
+      // Update in Supabase
+      const { error } = await supabase.from("profiles").update({ training_level: level }).eq("user_id", user.id)
+
+      if (error) {
+        console.error("Error updating training level:", error)
+        Alert.alert("Error", "Failed to update training level. Please try again.")
+        return
+      }
+
+      // Update local state
+      setProfileData((prev) => (prev ? { ...prev, training_level: level } : prev))
+
+      // Update user context
+      updateUserContextProfile({ trainingLevel: level })
+
+      // Close modal
+      setShowTrainingLevelModal(false)
+    } catch (error) {
+      console.error("Error in handleTrainingLevelSelect:", error)
+      Alert.alert("Error", "An unexpected error occurred.")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleEditField = (field, value, unit = "") => {
@@ -59,37 +201,80 @@ const ProfileScreen = ({ navigation }) => {
       return
     }
 
-    let updateData = {}
+    try {
+      setIsLoading(true)
 
-    switch (editField) {
-      case "name":
-        updateData = { name: inputValue }
-        break
-      case "age":
-        updateData = { age: inputValue }
-        break
-      case "weight":
-        updateData = { weight: inputValue }
-        break
-      case "height":
-        updateData = { height: inputValue }
-        break
-    }
+      let updateData = {}
+      let userContextUpdate = {}
 
-    const result = await updateProfile(updateData)
+      switch (editField) {
+        case "name":
+          updateData = { full_name: inputValue }
+          userContextUpdate = { name: inputValue }
+          break
+        case "age":
+          updateData = { age: Number.parseInt(inputValue) }
+          userContextUpdate = { age: Number.parseInt(inputValue) }
+          break
+        case "weight":
+          updateData = { weight: Number.parseFloat(inputValue) }
+          userContextUpdate = { weight: Number.parseFloat(inputValue) }
+          break
+        case "height":
+          updateData = { height: Number.parseFloat(inputValue) }
+          userContextUpdate = { height: Number.parseFloat(inputValue) }
+          break
+        case "goal":
+          updateData = { fitness_goal: inputValue }
+          userContextUpdate = { goal: inputValue }
+          break
+      }
 
-    if (result.success) {
+      // Update in Supabase
+      const { error } = await supabase.from("profiles").update(updateData).eq("user_id", user.id)
+
+      if (error) {
+        console.error("Error updating profile:", error)
+        Alert.alert("Error", "Failed to update profile. Please try again.")
+        return
+      }
+
+      // Update local state
+      setProfileData((prev) => (prev ? { ...prev, ...updateData } : prev))
+
+      // Update user context
+      updateUserContextProfile(userContextUpdate)
+
+      // Close modal
       setModalVisible(false)
-    } else {
-      Alert.alert("Error", "Failed to update profile. Please try again.")
+    } catch (error) {
+      console.error("Error in handleSave:", error)
+      Alert.alert("Error", "An unexpected error occurred.")
+    } finally {
+      setIsLoading(false)
     }
   }
 
   const getGoalName = () => {
-    if (!userProfile.goal) return "Not set"
+    if (!profileData?.fitness_goal) return "Not set"
 
-    const goal = fitnessGoals.find((g) => g.id === userProfile.goal)
+    const goal = fitnessGoals.find((g) => g.id === profileData.fitness_goal)
     return goal ? goal.title : "Not set"
+  }
+
+  // Get the title of the selected training level
+  const getTrainingLevelTitle = () => {
+    const level = trainingLevels.find((level) => level.id === (profileData?.training_level || "intermediate"))
+    return level ? level.title : "Not set"
+  }
+
+  if (authLoading || isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="cyan" />
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
+    )
   }
 
   return (
@@ -109,34 +294,40 @@ const ProfileScreen = ({ navigation }) => {
         </View>
 
         <View style={styles.infoSection}>
-          <TouchableOpacity style={styles.infoRow} onPress={() => handleEditField("name", userProfile.name)}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => handleEditField("name", profileData?.full_name)}>
             <Text style={styles.infoLabel}>Name</Text>
             <View style={styles.infoValueContainer}>
-              <Text style={styles.infoValue}>{userProfile.name || "Not set"}</Text>
+              <Text style={styles.infoValue}>{profileData?.full_name || "Not set"}</Text>
               <Ionicons name="chevron-forward" size={20} color="#aaa" />
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => handleEditField("age", userProfile.age)}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => handleEditField("age", profileData?.age?.toString())}>
             <Text style={styles.infoLabel}>Age</Text>
             <View style={styles.infoValueContainer}>
-              <Text style={styles.infoValue}>{userProfile.age || "Not set"}</Text>
+              <Text style={styles.infoValue}>{profileData?.age || "Not set"}</Text>
               <Ionicons name="chevron-forward" size={20} color="#aaa" />
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => handleEditField("weight", userProfile.weight, "lbs")}>
+          <TouchableOpacity
+            style={styles.infoRow}
+            onPress={() => handleEditField("weight", profileData?.weight?.toString(), "lbs")}
+          >
             <Text style={styles.infoLabel}>Weight</Text>
             <View style={styles.infoValueContainer}>
-              <Text style={styles.infoValue}>{userProfile.weight ? `${userProfile.weight} lbs` : "Not set"}</Text>
+              <Text style={styles.infoValue}>{profileData?.weight ? `${profileData.weight} lbs` : "Not set"}</Text>
               <Ionicons name="chevron-forward" size={20} color="#aaa" />
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => handleEditField("height", userProfile.height, "in")}>
+          <TouchableOpacity
+            style={styles.infoRow}
+            onPress={() => handleEditField("height", profileData?.height?.toString(), "in")}
+          >
             <Text style={styles.infoLabel}>Height</Text>
             <View style={styles.infoValueContainer}>
-              <Text style={styles.infoValue}>{userProfile.height ? `${userProfile.height} in` : "Not set"}</Text>
+              <Text style={styles.infoValue}>{profileData?.height ? `${profileData.height} in` : "Not set"}</Text>
               <Ionicons name="chevron-forward" size={20} color="#aaa" />
             </View>
           </TouchableOpacity>
@@ -159,7 +350,7 @@ const ProfileScreen = ({ navigation }) => {
 
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Email</Text>
-            <Text style={styles.infoValue}>{user?.email || "Not available"}</Text>
+            <Text style={styles.infoValue}>{profileData?.email || user?.email || "Not available"}</Text>
           </View>
         </View>
 
@@ -181,6 +372,7 @@ const ProfileScreen = ({ navigation }) => {
         </View>
       </ScrollView>
 
+      {/* PR Edit Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -242,7 +434,7 @@ const ProfileScreen = ({ navigation }) => {
                   key={level.id}
                   style={[
                     styles.trainingLevelItem,
-                    userProfile.trainingLevel === level.id && styles.trainingLevelItemSelected,
+                    profileData?.training_level === level.id && styles.trainingLevelItemSelected,
                   ]}
                   onPress={() => handleTrainingLevelSelect(level.id)}
                 >
@@ -250,12 +442,12 @@ const ProfileScreen = ({ navigation }) => {
                     <Text
                       style={[
                         styles.trainingLevelTitleText,
-                        userProfile.trainingLevel === level.id && styles.trainingLevelTitleSelected,
+                        profileData?.training_level === level.id && styles.trainingLevelTitleSelected,
                       ]}
                     >
                       {level.title}
                     </Text>
-                    {userProfile.trainingLevel === level.id && (
+                    {profileData?.training_level === level.id && (
                       <Ionicons name="checkmark-circle" size={22} color="cyan" />
                     )}
                   </View>
@@ -288,6 +480,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "black",
+  },
+  loadingContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    color: "white",
+    fontSize: 16,
+    marginTop: 10,
   },
   header: {
     flexDirection: "row",

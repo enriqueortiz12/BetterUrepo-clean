@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Platform,
   Dimensions,
+  Alert,
 } from "react-native"
 import { useAuth } from "../../context/AuthContext"
 import { Ionicons } from "@expo/vector-icons"
@@ -36,6 +37,14 @@ const OnboardingScreen = ({ navigation }) => {
     gender: "",
     height: null,
   })
+
+  // Add this useEffect to log when the screen is mounted
+  useEffect(() => {
+    console.log("OnboardingScreen mounted, user:", user?.id)
+
+    // Alert to confirm we're on the onboarding screen
+    Alert.alert("Welcome to Onboarding", "Let's set up your profile to get started!", [{ text: "OK" }])
+  }, [])
 
   const totalSteps = 5
 

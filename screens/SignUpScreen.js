@@ -56,15 +56,33 @@ const SignUpScreen = ({ navigation }) => {
     setError(null)
 
     try {
-      const { error } = await signUp(email, password, fullName)
+      const { error, user } = await signUp(email, password, fullName)
 
       if (error) {
         setError(error.message)
         Alert.alert("Sign Up Failed", error.message)
       } else {
-        Alert.alert("Success", "Account created successfully! Please complete your profile setup.")
-        // Navigate to onboarding after successful signup
-        navigation.replace("Onboarding")
+        // Don't use Alert with navigation - it can cause timing issues
+        // Instead, navigate directly to Onboarding
+        console.log("Account created successfully, navigating to Onboarding")
+
+        // Add a small delay to ensure auth state is updated
+        setTimeout(() => {
+          // First show a success message
+          Alert.alert("Account Created", "Your account has been created successfully!", [
+            {
+              text: "Continue",
+              onPress: () => {
+                console.log("Navigating to Onboarding screen")
+                // Force navigation to Onboarding
+                navigation.reset({
+                  index: 0,
+                  routes: [{ name: "Onboarding" }],
+                })
+              },
+            },
+          ])
+        }, 500)
       }
     } catch (error) {
       setError("An unexpected error occurred")
@@ -74,6 +92,9 @@ const SignUpScreen = ({ navigation }) => {
       setIsLoading(false)
     }
   }
+
+  // Define the logo source directly
+  const logoSource = require("../assets/logo.png")
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -86,7 +107,8 @@ const SignUpScreen = ({ navigation }) => {
           <View style={styles.contentContainer}>
             <View style={styles.logoContainer}>
               <View style={styles.logoWrapper}>
-                <Image source={require("../assets/logo.png")} style={styles.logo} resizeMode="contain" />
+                {/* Use the directly defined source */}
+                <Image source={logoSource} style={styles.logo} resizeMode="contain" />
               </View>
               <Text style={styles.appName}>BetterU</Text>
             </View>

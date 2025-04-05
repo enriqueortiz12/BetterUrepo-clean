@@ -13,6 +13,7 @@ import {
   Animated,
   Platform,
   Dimensions,
+  KeyboardAvoidingView,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import GlassmorphicCard from "../components/GlassmorphicCard"
@@ -447,178 +448,184 @@ const WorkoutAnalysisScreen = ({ navigation, route }) => {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
-        <Text style={styles.title}>{getExerciseTitle()} Analysis</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.exerciseImageContainer}>
-          {videoUri && showVideoPreview ? (
-            <View style={styles.videoPreviewContainer}>
-              <Image source={{ uri: videoUri }} style={styles.exerciseImage} resizeMode="cover" />
-              <View style={styles.videoOverlay}>
-                <TouchableOpacity style={styles.videoPlayButton}>
-                  <Ionicons name="play" size={40} color="white" />
-                </TouchableOpacity>
-              </View>
-
-              {/* Video info badge */}
-              <View style={styles.videoInfoBadge}>
-                <Ionicons name="videocam" size={14} color="white" />
-                <Text style={styles.videoInfoText}>{getExerciseTitle()} Form Video</Text>
-              </View>
-            </View>
-          ) : (
-            <Image
-              source={{ uri: `/placeholder.svg?height=300&width=300&text=${getExerciseTitle()}` }}
-              style={styles.exerciseImage}
-              resizeMode="cover"
-            />
-          )}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+    >
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="white" />
+          </TouchableOpacity>
+          <Text style={styles.title}>{getExerciseTitle()} Analysis</Text>
+          <View style={{ width: 24 }} />
         </View>
 
-        {/* Upload status indicator */}
-        {renderUploadStatus()}
-
-        {!analysisComplete ? (
-          <View style={styles.analysisContainer}>
-            <GlassmorphicCard style={styles.instructionCard}>
-              <Text style={styles.instructionTitle}>Form Analysis</Text>
-              <Text style={styles.instructionText}>
-                Our AI trainer will analyze your {getExerciseTitle().toLowerCase()} form and provide personalized
-                feedback to help you improve.
-              </Text>
-
-              {/* Model loading error message */}
-              {isLoadingModel ? (
-                <View style={styles.modelLoadingContainer}>
-                  <ActivityIndicator size="large" color="cyan" />
-                  <Text style={styles.modelLoadingText}>Loading AI analysis model...</Text>
-                </View>
-              ) : modelLoadingError ? (
-                <ModelErrorMessage error={modelLoadingError} onRetry={retryModelLoading} showTroubleshooting={true} />
-              ) : (
-                <View style={styles.modelReadyContainer}>
-                  <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-                  <Text style={styles.modelReadyText}>AI analysis model ready</Text>
-                </View>
-              )}
-
-              <View style={styles.stepsContainer}>
-                <View style={styles.step}>
-                  <View style={styles.stepNumber}>
-                    <Text style={styles.stepNumberText}>1</Text>
-                  </View>
-                  <Text style={styles.stepText}>Record or upload a video of your exercise form</Text>
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <View style={styles.exerciseImageContainer}>
+            {videoUri && showVideoPreview ? (
+              <View style={styles.videoPreviewContainer}>
+                <Image source={{ uri: videoUri }} style={styles.exerciseImage} resizeMode="cover" />
+                <View style={styles.videoOverlay}>
+                  <TouchableOpacity style={styles.videoPlayButton}>
+                    <Ionicons name="play" size={40} color="white" />
+                  </TouchableOpacity>
                 </View>
 
-                <View style={styles.step}>
-                  <View style={styles.stepNumber}>
-                    <Text style={styles.stepNumberText}>2</Text>
-                  </View>
-                  <Text style={styles.stepText}>Submit the video for AI analysis</Text>
-                </View>
-
-                <View style={styles.step}>
-                  <View style={styles.stepNumber}>
-                    <Text style={styles.stepNumberText}>3</Text>
-                  </View>
-                  <Text style={styles.stepText}>Get personalized feedback and tips</Text>
+                {/* Video info badge */}
+                <View style={styles.videoInfoBadge}>
+                  <Ionicons name="videocam" size={14} color="white" />
+                  <Text style={styles.videoInfoText}>{getExerciseTitle()} Form Video</Text>
                 </View>
               </View>
-
-              {analyzing ? (
-                <View style={styles.analyzingContainer}>
-                  <ActivityIndicator size="large" color="cyan" />
-                  <Text style={styles.analyzingText}>Analyzing your form...</Text>
-                  <View style={styles.analyzingSteps}>
-                    <Text style={styles.analyzingStepText}>✓ Detecting body position</Text>
-                    <Text style={styles.analyzingStepText}>✓ Tracking movement patterns</Text>
-                    <Text style={styles.analyzingStepText}>⋯ Evaluating technique</Text>
-                    <Text style={styles.analyzingStepText}>⋯ Generating feedback</Text>
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.videoButtonsContainer}>
-                  {videoUri && showVideoPreview ? (
-                    <TouchableOpacity style={styles.analyzeButton} onPress={analyzeWorkout} disabled={isUploading}>
-                      <Ionicons name="analytics" size={20} color="black" />
-                      <Text style={styles.analyzeButtonText}>Analyze My Form</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <>
-                      <TouchableOpacity style={styles.videoButton} onPress={recordVideo} disabled={isUploading}>
-                        <Ionicons name="videocam" size={20} color="black" />
-                        <Text style={styles.videoButtonText}>Record Video</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity style={styles.videoButton} onPress={pickVideo} disabled={isUploading}>
-                        <Ionicons name="cloud-upload" size={20} color="black" />
-                        <Text style={styles.videoButtonText}>Upload Video</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </View>
-              )}
-            </GlassmorphicCard>
+            ) : (
+              <Image
+                source={{ uri: `/placeholder.svg?height=300&width=300&text=${getExerciseTitle()}` }}
+                style={styles.exerciseImage}
+                resizeMode="cover"
+              />
+            )}
           </View>
-        ) : (
-          <View style={styles.feedbackContainer}>
-            <GlassmorphicCard
-              style={styles.scoreCard}
-              color="rgba(0, 255, 255, 0.1)"
-              borderColor="rgba(0, 255, 255, 0.3)"
-            >
-              <Text style={styles.scoreTitle}>Form Score</Text>
-              <View style={styles.scoreCircle}>
-                <Text style={styles.scoreText}>{feedback.score}</Text>
-                <Text style={styles.scoreMax}>/100</Text>
-              </View>
-            </GlassmorphicCard>
 
-            <GlassmorphicCard style={styles.feedbackCard}>
-              <Text style={styles.feedbackTitle}>Strengths</Text>
-              {feedback.strengths.map((strength, index) => (
-                <View key={`strength-${index}`} style={styles.feedbackItem}>
-                  <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
-                  <Text style={styles.feedbackText}>{strength}</Text>
+          {/* Upload status indicator */}
+          {renderUploadStatus()}
+
+          {!analysisComplete ? (
+            <View style={styles.analysisContainer}>
+              <GlassmorphicCard style={styles.instructionCard}>
+                <Text style={styles.instructionTitle}>Form Analysis</Text>
+                <Text style={styles.instructionText}>
+                  Our AI trainer will analyze your {getExerciseTitle().toLowerCase()} form and provide personalized
+                  feedback to help you improve.
+                </Text>
+
+                {/* Model loading error message */}
+                {isLoadingModel ? (
+                  <View style={styles.modelLoadingContainer}>
+                    <ActivityIndicator size="large" color="cyan" />
+                    <Text style={styles.modelLoadingText}>Loading AI analysis model...</Text>
+                  </View>
+                ) : modelLoadingError ? (
+                  <ModelErrorMessage error={modelLoadingError} onRetry={retryModelLoading} showTroubleshooting={true} />
+                ) : (
+                  <View style={styles.modelReadyContainer}>
+                    <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                    <Text style={styles.modelReadyText}>AI analysis model ready</Text>
+                  </View>
+                )}
+
+                <View style={styles.stepsContainer}>
+                  <View style={styles.step}>
+                    <View style={styles.stepNumber}>
+                      <Text style={styles.stepNumberText}>1</Text>
+                    </View>
+                    <Text style={styles.stepText}>Record or upload a video of your exercise form</Text>
+                  </View>
+
+                  <View style={styles.step}>
+                    <View style={styles.stepNumber}>
+                      <Text style={styles.stepNumberText}>2</Text>
+                    </View>
+                    <Text style={styles.stepText}>Submit the video for AI analysis</Text>
+                  </View>
+
+                  <View style={styles.step}>
+                    <View style={styles.stepNumber}>
+                      <Text style={styles.stepNumberText}>3</Text>
+                    </View>
+                    <Text style={styles.stepText}>Get personalized feedback and tips</Text>
+                  </View>
                 </View>
-              ))}
-            </GlassmorphicCard>
 
-            <GlassmorphicCard style={styles.feedbackCard}>
-              <Text style={styles.feedbackTitle}>Areas to Improve</Text>
-              {feedback.improvements.map((improvement, index) => (
-                <View key={`improvement-${index}`} style={styles.feedbackItem}>
-                  <Ionicons name="alert-circle" size={20} color="#FFC107" />
-                  <Text style={styles.feedbackText}>{improvement}</Text>
-                </View>
-              ))}
-            </GlassmorphicCard>
+                {analyzing ? (
+                  <View style={styles.analyzingContainer}>
+                    <ActivityIndicator size="large" color="cyan" />
+                    <Text style={styles.analyzingText}>Analyzing your form...</Text>
+                    <View style={styles.analyzingSteps}>
+                      <Text style={styles.analyzingStepText}>✓ Detecting body position</Text>
+                      <Text style={styles.analyzingStepText}>✓ Tracking movement patterns</Text>
+                      <Text style={styles.analyzingStepText}>⋯ Evaluating technique</Text>
+                      <Text style={styles.analyzingStepText}>⋯ Generating feedback</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.videoButtonsContainer}>
+                    {videoUri && showVideoPreview ? (
+                      <TouchableOpacity style={styles.analyzeButton} onPress={analyzeWorkout} disabled={isUploading}>
+                        <Ionicons name="analytics" size={20} color="black" />
+                        <Text style={styles.analyzeButtonText}>Analyze My Form</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <>
+                        <TouchableOpacity style={styles.videoButton} onPress={recordVideo} disabled={isUploading}>
+                          <Ionicons name="videocam" size={20} color="black" />
+                          <Text style={styles.videoButtonText}>Record Video</Text>
+                        </TouchableOpacity>
 
-            <GlassmorphicCard style={styles.feedbackCard}>
-              <Text style={styles.feedbackTitle}>Coach's Tips</Text>
-              <Text style={styles.tipsText}>{feedback.tips}</Text>
-            </GlassmorphicCard>
-
-            <View style={styles.actionsContainer}>
-              <TouchableOpacity style={styles.resetButton} onPress={resetAnalysis}>
-                <Text style={styles.resetButtonText}>New Analysis</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.trainerButton} onPress={talkToTrainer}>
-                <Text style={styles.trainerButtonText}>Talk to AI Trainer</Text>
-              </TouchableOpacity>
+                        <TouchableOpacity style={styles.videoButton} onPress={pickVideo} disabled={isUploading}>
+                          <Ionicons name="cloud-upload" size={20} color="black" />
+                          <Text style={styles.videoButtonText}>Upload Video</Text>
+                        </TouchableOpacity>
+                      </>
+                    )}
+                  </View>
+                )}
+              </GlassmorphicCard>
             </View>
-          </View>
-        )}
-      </ScrollView>
-    </View>
+          ) : (
+            <View style={styles.feedbackContainer}>
+              <GlassmorphicCard
+                style={styles.scoreCard}
+                color="rgba(0, 255, 255, 0.1)"
+                borderColor="rgba(0, 255, 255, 0.3)"
+              >
+                <Text style={styles.scoreTitle}>Form Score</Text>
+                <View style={styles.scoreCircle}>
+                  <Text style={styles.scoreText}>{feedback.score}</Text>
+                  <Text style={styles.scoreMax}>/100</Text>
+                </View>
+              </GlassmorphicCard>
+
+              <GlassmorphicCard style={styles.feedbackCard}>
+                <Text style={styles.feedbackTitle}>Strengths</Text>
+                {feedback.strengths.map((strength, index) => (
+                  <View key={`strength-${index}`} style={styles.feedbackItem}>
+                    <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                    <Text style={styles.feedbackText}>{strength}</Text>
+                  </View>
+                ))}
+              </GlassmorphicCard>
+
+              <GlassmorphicCard style={styles.feedbackCard}>
+                <Text style={styles.feedbackTitle}>Areas to Improve</Text>
+                {feedback.improvements.map((improvement, index) => (
+                  <View key={`improvement-${index}`} style={styles.feedbackItem}>
+                    <Ionicons name="alert-circle" size={20} color="#FFC107" />
+                    <Text style={styles.feedbackText}>{improvement}</Text>
+                  </View>
+                ))}
+              </GlassmorphicCard>
+
+              <GlassmorphicCard style={styles.feedbackCard}>
+                <Text style={styles.feedbackTitle}>Coach's Tips</Text>
+                <Text style={styles.tipsText}>{feedback.tips}</Text>
+              </GlassmorphicCard>
+
+              <View style={styles.actionsContainer}>
+                <TouchableOpacity style={styles.resetButton} onPress={resetAnalysis}>
+                  <Text style={styles.resetButtonText}>New Analysis</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.trainerButton} onPress={talkToTrainer}>
+                  <Text style={styles.trainerButtonText}>Talk to AI Trainer</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
   )
 }
 

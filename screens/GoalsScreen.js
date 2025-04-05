@@ -5,17 +5,39 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Alert }
 import { Ionicons } from "@expo/vector-icons"
 import { fitnessGoals } from "../data/goalsData"
 import { useUser } from "../context/UserContext"
+import { useAuth } from "../context/AuthContext"
+import { supabase } from "../lib/supabase"
 
+// Add the user from useAuth in the component
 const GoalsScreen = ({ navigation }) => {
   const { userProfile, updateProfile } = useUser()
+  const { user } = useAuth()
   const [selectedGoal, setSelectedGoal] = useState(userProfile.goal || null)
 
   const handleSelectGoal = async (goalId) => {
     setSelectedGoal(goalId)
 
-    const result = await updateProfile({ goal: goalId })
+    try {
+      // First update the local user profile
+      const result = await updateProfile({ goal: goalId })
 
-    if (!result.success) {
+      if (!result.success) {
+        Alert.alert("Error", "Failed to update goal in local storage. Please try again.")
+        setSelectedGoal(userProfile.goal)
+        return
+      }
+
+      // Then update the Supabase profile if user is logged in
+      if (user && user.id) {
+        const { error } = await supabase.from("profiles").update({ fitness_goal: goalId }).eq("user_id", user.id)
+
+        if (error) {
+          console.error("Error updating goal in Supabase:", error)
+          Alert.alert("Warning", "Goal updated locally but failed to sync with cloud.")
+        }
+      }
+    } catch (error) {
+      console.error("Error in handleSelectGoal:", error)
       Alert.alert("Error", "Failed to update goal. Please try again.")
       setSelectedGoal(userProfile.goal)
     }

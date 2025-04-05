@@ -23,7 +23,8 @@ import { Ionicons } from "@expo/vector-icons"
 import { useTrainer } from "../context/TrainerContext"
 import { useUser } from "../context/UserContext"
 
-const { width } = Dimensions.get("window")
+const { width, height } = Dimensions.get("window")
+const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 
 const TrainerScreen = ({ navigation, route }) => {
   const { conversations, sendMessage, isLoading, apiKeySet } = useTrainer()
@@ -32,14 +33,30 @@ const TrainerScreen = ({ navigation, route }) => {
   const [isTyping, setIsTyping] = useState(false)
   const flatListRef = useRef(null)
   const inputRef = useRef(null)
-  const fadeAnim = useRef(new Animated.Value(0)).current
-  const scaleAnim = useRef(new Animated.Value(0.95)).current
-  const glowAnim = useRef(new Animated.Value(0)).current
+
+  // Use state for animated values instead of refs
+  const [fadeAnim] = useState(new Animated.Value(0))
+  const [scaleAnim] = useState(new Animated.Value(0.95))
+  const [glowAnim] = useState(new Animated.Value(0.3))
+  const [typingDots] = useState([new Animated.Value(0.4), new Animated.Value(0.7), new Animated.Value(1)])
+
+  // Check if API key is properly set
+  useEffect(() => {
+    if (!apiKeySet) {
+      console.log("API key not set or invalid. Using fallback responses.")
+    }
+  }, [apiKeySet])
 
   // Check for initial message from navigation params
   useEffect(() => {
     if (route.params?.initialMessage) {
       setMessage(route.params.initialMessage)
+      // Focus the input after setting the message
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus()
+        }
+      }, 100)
       // Clear the param to prevent reuse on screen revisit
       navigation.setParams({ initialMessage: undefined })
     }
@@ -47,24 +64,14 @@ const TrainerScreen = ({ navigation, route }) => {
 
   // Animate the trainer avatar when the screen loads
   useEffect(() => {
-    // Create separate animated values for native-driven and JS-driven animations
-    const fadeAnimValue = new Animated.Value(0)
-    const scaleAnimValue = new Animated.Value(0.95)
-    const glowAnimValue = new Animated.Value(0)
-
-    // Set the refs to the new values
-    fadeAnim.current = fadeAnimValue
-    scaleAnim.current = scaleAnimValue
-    glowAnim.current = glowAnimValue
-
     // Native-driven animations (opacity, transform)
     Animated.parallel([
-      Animated.timing(fadeAnimValue, {
+      Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 800,
         useNativeDriver: true,
       }),
-      Animated.timing(scaleAnimValue, {
+      Animated.timing(scaleAnim, {
         toValue: 1,
         duration: 800,
         useNativeDriver: true,
@@ -74,13 +81,13 @@ const TrainerScreen = ({ navigation, route }) => {
     // JS-driven animations (colors, shadows)
     const glowAnimation = Animated.loop(
       Animated.sequence([
-        Animated.timing(glowAnimValue, {
+        Animated.timing(glowAnim, {
           toValue: 1,
           duration: 1500,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: false,
         }),
-        Animated.timing(glowAnimValue, {
+        Animated.timing(glowAnim, {
           toValue: 0.3,
           duration: 1500,
           easing: Easing.inOut(Easing.ease),
@@ -94,7 +101,37 @@ const TrainerScreen = ({ navigation, route }) => {
     return () => {
       glowAnimation.stop()
     }
-  }, [])
+  }, [fadeAnim, scaleAnim, glowAnim])
+
+  // Animate typing dots
+  useEffect(() => {
+    if (isTyping) {
+      const animations = typingDots.map((dot, i) => {
+        return Animated.sequence([
+          Animated.timing(dot, {
+            toValue: 1,
+            duration: 400,
+            delay: i * 150,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot, {
+            toValue: 0.4,
+            duration: 400,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ])
+      })
+
+      const dotsAnimation = Animated.loop(Animated.stagger(150, animations))
+      dotsAnimation.start()
+
+      return () => {
+        dotsAnimation.stop()
+      }
+    }
+  }, [isTyping, typingDots])
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -173,126 +210,140 @@ const TrainerScreen = ({ navigation, route }) => {
     return `Hey ${firstName}! I'm your AI personal trainer. How can I help you today?`
   }
 
-  // Interpolate shadow opacity only if not on iOS
-  const shadowOpacity =
-    Platform && Platform.OS === "ios"
-      ? 0.5 // Fixed value for iOS
-      : glowAnim.current.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.2, 0.8],
-        })
-
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>AI Trainer</Text>
-        <TouchableOpacity style={styles.settingsButton}>
-          <Ionicons name="options-outline" size={24} color="white" />
-        </TouchableOpacity>
-      </View>
-
-      {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0099ff" />
-          <Text style={styles.loadingText}>Loading your trainer...</Text>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>AI Trainer</Text>
+          <TouchableOpacity style={styles.settingsButton}>
+            <Ionicons name="options-outline" size={24} color="white" />
+          </TouchableOpacity>
         </View>
-      ) : (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.keyboardAvoidingView}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
-        >
-          <View style={styles.trainerInfoContainer}>
-            <Animated.View
-              style={[
-                styles.trainerAvatarLarge,
-                // Native-driven properties
-                {
-                  opacity: fadeAnim.current,
-                  transform: [{ scale: scaleAnim.current }],
-                },
-                // JS-driven properties
-                {
-                  shadowOpacity: shadowOpacity,
-                },
-              ]}
-            >
-              <Image source={require("../assets/logo.png")} style={styles.avatarLargeImage} resizeMode="contain" />
-            </Animated.View>
-            <View style={styles.trainerInfo}>
-              <Text style={styles.trainerName}>BetterU AI Trainer</Text>
-              <Text style={styles.trainerStatus}>{apiKeySet ? "Online - GPT Powered" : "Online - Basic Mode"}</Text>
-            </View>
+
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#0099ff" />
+            <Text style={styles.loadingText}>Loading your trainer...</Text>
           </View>
-
-          {!conversations || conversations.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>{getGreeting()}</Text>
-              <Text style={styles.emptySubtext}>Ask me about workouts, form, nutrition, or motivation!</Text>
-            </View>
-          ) : (
-            <FlatList
-              ref={flatListRef}
-              data={conversations}
-              renderItem={renderMessage}
-              keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.messagesContainer}
-              showsVerticalScrollIndicator={false}
-            />
-          )}
-
-          {isTyping && (
-            <View style={styles.typingContainer}>
-              <View style={styles.typingBubble}>
-                <Text style={styles.typingText}>AI Trainer is typing</Text>
-                <View style={styles.typingDots}>
-                  <View style={[styles.typingDot, styles.typingDot1]} />
-                  <View style={[styles.typingDot, styles.typingDot2]} />
-                  <View style={[styles.typingDot, styles.typingDot3]} />
-                </View>
+        ) : (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.keyboardAvoidingView}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 120 : 20}
+          >
+            <View style={styles.trainerInfoContainer}>
+              <Animated.View
+                style={[
+                  styles.trainerAvatarLarge,
+                  {
+                    opacity: fadeAnim,
+                    transform: [{ scale: scaleAnim }],
+                    shadowOpacity: 0.5, // Use a fixed value instead of interpolate
+                  },
+                ]}
+              >
+                <Image source={require("../assets/logo.png")} style={styles.avatarLargeImage} resizeMode="contain" />
+              </Animated.View>
+              <View style={styles.trainerInfo}>
+                <Text style={styles.trainerName}>BetterU AI Trainer</Text>
+                <Text style={styles.trainerStatus}>{apiKeySet ? "Online - GPT Powered" : "Online - Basic Mode"}</Text>
               </View>
             </View>
-          )}
 
-          <View style={styles.suggestionsContainer}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.suggestionsScrollView}
-            >
-              {renderSuggestion("Suggest a workout for me")}
-              {renderSuggestion("How's my form?")}
-              {renderSuggestion("Need some motivation")}
-              {renderSuggestion("Nutrition tips")}
-              {renderSuggestion("Track my progress")}
-            </ScrollView>
-          </View>
+            {!conversations || conversations.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>{getGreeting()}</Text>
+                <Text style={styles.emptySubtext}>
+                  {apiKeySet
+                    ? "Ask me about workouts, form, nutrition, or motivation!"
+                    : "API key not configured. I'll provide basic responses until an API key is added."}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                ref={flatListRef}
+                data={conversations}
+                renderItem={renderMessage}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.messagesContainer}
+                showsVerticalScrollIndicator={false}
+              />
+            )}
 
-          <View style={styles.inputContainer}>
-            <TextInput
-              ref={inputRef}
-              style={styles.input}
-              placeholder="Ask your AI trainer..."
-              placeholderTextColor="#666"
-              value={message}
-              onChangeText={setMessage}
-              multiline
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
-              onPress={handleSendMessage}
-              disabled={!message.trim()}
-            >
-              <Ionicons name="send" size={20} color={message.trim() ? "black" : "#666"} />
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      )}
+            {isTyping && (
+              <View style={styles.typingContainer}>
+                <View style={styles.typingBubble}>
+                  <Text style={styles.typingText}>AI Trainer is typing</Text>
+                  <View style={styles.typingDots}>
+                    {typingDots.map((dot, index) => (
+                      <Animated.View
+                        key={index}
+                        style={[
+                          styles.typingDot,
+                          {
+                            opacity: dot,
+                            transform: [
+                              {
+                                scale: dot.interpolate({
+                                  inputRange: [0.4, 1],
+                                  outputRange: [0.8, 1.2],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.suggestionsContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.suggestionsScrollView}
+              >
+                {renderSuggestion("Suggest a workout for me")}
+                {renderSuggestion("How's my form?")}
+                {renderSuggestion("Need some motivation")}
+                {renderSuggestion("Nutrition tips")}
+                {renderSuggestion("Track my progress")}
+              </ScrollView>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <TextInput
+                ref={inputRef}
+                style={styles.input}
+                placeholder="Ask your AI trainer..."
+                placeholderTextColor="#666"
+                value={message}
+                onChangeText={setMessage}
+                multiline
+              />
+              <TouchableOpacity
+                style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
+                onPress={handleSendMessage}
+                disabled={!message.trim()}
+              >
+                <Ionicons name="send" size={20} color={message.trim() ? "black" : "#666"} />
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        )}
+      </View>
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "black",
+    paddingTop: Platform.OS === "ios" ? (isIphoneX ? 0 : 0) : 0, // Adjusted for iOS
+  },
   container: {
     flex: 1,
     backgroundColor: "black",
@@ -342,10 +393,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255, 255, 255, 0.1)",
   },
   trainerAvatarLarge: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: "transparent", // Changed from black to transparent
+    width: 60, // Reduced from 70
+    height: 60, // Reduced from 70
+    borderRadius: 30,
+    backgroundColor: "transparent",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 15,
@@ -358,15 +409,15 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   avatarLargeImage: {
-    width: 66,
-    height: 66,
+    width: 56, // Reduced from 66
+    height: 56, // Reduced from 66
   },
   trainerInfo: {
     flex: 1,
   },
   trainerName: {
     color: "white",
-    fontSize: 20,
+    fontSize: 18, // Reduced from 20
     fontWeight: "bold",
     marginBottom: 5,
   },
@@ -396,11 +447,12 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 10,
     paddingVertical: 15,
+    paddingBottom: 30, // Added extra padding at bottom
   },
   messageContainer: {
     flexDirection: "row",
     marginBottom: 15,
-    maxWidth: "80%",
+    maxWidth: Platform.OS === "ios" ? "85%" : "80%", // Wider on iOS
   },
   trainerMessageContainer: {
     alignSelf: "flex-start",
@@ -410,10 +462,10 @@ const styles = StyleSheet.create({
     flexDirection: "row-reverse",
   },
   trainerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "transparent", // Changed from black to transparent
+    width: 36, // Reduced from 40
+    height: 36, // Reduced from 40
+    borderRadius: 18,
+    backgroundColor: "transparent",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 8,
@@ -423,13 +475,13 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0, 153, 255, 0.3)",
   },
   avatarImage: {
-    width: 40,
-    height: 40,
+    width: 36, // Reduced from 40
+    height: 36, // Reduced from 40
   },
   userAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32, // Reduced from 36
+    height: 32, // Reduced from 36
+    borderRadius: 16,
     backgroundColor: "#0099ff",
     justifyContent: "center",
     alignItems: "center",
@@ -453,7 +505,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0, 153, 255, 0.3)",
   },
   messageText: {
-    fontSize: 16,
+    fontSize: Platform.OS === "ios" ? 15 : 16, // Smaller on iOS
     marginBottom: 5,
   },
   trainerMessageText: {
@@ -463,7 +515,7 @@ const styles = StyleSheet.create({
     color: "white",
   },
   timestamp: {
-    fontSize: 12,
+    fontSize: 10, // Reduced from 12
     color: "#aaa",
     alignSelf: "flex-end",
   },
@@ -497,15 +549,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#aaa",
     marginHorizontal: 2,
   },
-  typingDot1: {
-    opacity: 0.4,
-  },
-  typingDot2: {
-    opacity: 0.7,
-  },
-  typingDot3: {
-    opacity: 1,
-  },
   suggestionsContainer: {
     paddingVertical: 10,
     borderTopWidth: 1,
@@ -534,16 +577,20 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: "rgba(255, 255, 255, 0.1)",
-    backgroundColor: "rgba(20, 20, 20, 0.9)",
+    backgroundColor: "rgba(20, 20, 20, 0.95)",
+    paddingBottom: Platform.OS === "ios" ? (isIphoneX ? 40 : 20) : 15, // Increased padding for iOS
+    position: "relative",
+    zIndex: 1000, // Ensure it's above the tab bar
   },
   input: {
     flex: 1,
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 20,
     paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingVertical: Platform.OS === "ios" ? 8 : 10, // Smaller on iOS
     color: "white",
     maxHeight: 100,
+    minHeight: Platform.OS === "ios" ? 36 : 40, // Smaller on iOS
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.2)",
   },

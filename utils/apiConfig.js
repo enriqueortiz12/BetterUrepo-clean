@@ -12,7 +12,7 @@ export const getOpenAIApiKey = async () => {
       return storedKey
     }
 
-    // If no stored key, use the default key from config and save it
+    // If no stored key, use the default key from config
     if (ENV && ENV.OPENAI_API_KEY) {
       await AsyncStorage.setItem("openai_api_key", ENV.OPENAI_API_KEY)
       return ENV.OPENAI_API_KEY

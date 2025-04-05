@@ -43,21 +43,72 @@ export const AuthProvider = ({ children }) => {
     }
   }, [])
 
+  // Update the fetchProfile function to be more robust and add a refetchProfile method
   const fetchProfile = async (userId) => {
     try {
+      setIsLoading(true)
+      console.log("AuthContext: Fetching profile for user ID:", userId)
+
+      if (!userId) {
+        console.error("AuthContext: No user ID provided to fetchProfile")
+        setProfile(null)
+        setIsLoading(false)
+        return
+      }
+
       const { data, error } = await supabase.from("profiles").select("*").eq("user_id", userId).single()
 
       if (error) {
-        console.error("Error fetching profile:", error)
+        console.error("AuthContext: Error fetching profile:", error)
+
+        // If profile doesn't exist, try to create one
+        if (error.code === "PGRST116") {
+          console.log("AuthContext: No profile found, attempting to create one")
+          await createInitialProfile(userId)
+        } else {
+          setProfile(null)
+        }
       } else {
+        console.log("AuthContext: Profile data fetched successfully:", data)
         setProfile(data)
       }
     } catch (error) {
-      console.error("Error fetching profile:", error)
+      console.error("AuthContext: Exception in fetchProfile:", error)
+      setProfile(null)
     } finally {
       setIsLoading(false)
     }
   }
+
+  // Add a function to create an initial profile
+  const createInitialProfile = async (userId) => {
+    try {
+      if (!userId) return
+
+      const user = await supabase.auth.getUser()
+      const email = user?.data?.user?.email
+
+      const initialProfile = {
+        user_id: userId,
+        full_name: email ? email.split("@")[0] : "New User",
+        email: email,
+        training_level: "intermediate",
+      }
+
+      const { data, error } = await supabase.from("profiles").insert([initialProfile]).select()
+
+      if (error) {
+        console.error("AuthContext: Error creating initial profile:", error)
+      } else {
+        console.log("AuthContext: Initial profile created:", data)
+        setProfile(data[0])
+      }
+    } catch (error) {
+      console.error("AuthContext: Error in createInitialProfile:", error)
+    }
+  }
+
+  // Update the signUp function to better handle the auth state:
 
   const signUp = async (email, password, fullName) => {
     try {
@@ -67,27 +118,49 @@ export const AuthProvider = ({ children }) => {
       })
 
       if (error) {
-        return { error }
+        console.error("Supabase signup error:", error)
+        return { error, user: null }
       }
 
       if (data?.user) {
+        console.log("User created in Supabase:", data.user.id)
+
+        // Set the user state immediately to trigger auth state change
+        setUser(data.user)
+
         // Create a profile for the new user
         const { error: profileError } = await supabase.from("profiles").insert([
           {
             user_id: data.user.id,
             full_name: fullName,
             email,
+            // Add these fields to ensure they exist but are incomplete
+            age: null,
+            weight: null,
+            height: null,
+            fitness_goal: null,
+            gender: null,
+            training_level: "intermediate",
           },
         ])
 
         if (profileError) {
-          return { error: profileError }
+          console.error("Error creating initial profile:", profileError)
+          return { error: profileError, user: data.user }
         }
+
+        console.log("Initial profile created successfully, needs completion")
+
+        // Fetch the profile to update the profile state
+        fetchProfile(data.user.id)
+
+        return { error: null, user: data.user }
       }
 
-      return { error: null }
+      return { error: new Error("No user data returned from signup"), user: null }
     } catch (error) {
-      return { error }
+      console.error("Signup error:", error)
+      return { error, user: null }
     }
   }
 
@@ -152,6 +225,7 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
+  // Add a refetchProfile method to the value object
   const value = {
     user,
     profile,
@@ -163,6 +237,7 @@ export const AuthProvider = ({ children }) => {
     updateProfile,
     resetPassword,
     updatePassword,
+    refetchProfile: () => user && fetchProfile(user.id),
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

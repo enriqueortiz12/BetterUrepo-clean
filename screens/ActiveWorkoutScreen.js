@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback, Platform } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { View, Text, StyleSheet, ScrollView, TextInput, Alert, Image, Modal } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import RestTimer from "../components/RestTimer"
@@ -137,7 +137,7 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
 
   const handleFinishWorkout = async () => {
     try {
-      // Create workout log entry
+      // Create workout log entry with more detailed information
       const workoutLog = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
@@ -146,21 +146,52 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
         exercises: workoutData.length,
         sets: workoutData.reduce((total, exercise) => total + exercise.sets.length, 0),
         exerciseNames: workoutData.map((exercise) => exercise.name),
+        // Add more detailed stats
+        completedSets: workoutData.reduce(
+          (total, exercise) => total + exercise.sets.filter((set) => set.completed).length,
+          0,
+        ),
+        totalWeight: workoutData.reduce(
+          (total, exercise) =>
+            total +
+            exercise.sets.reduce(
+              (setTotal, set) =>
+                setTotal + (set.completed ? Number(set.weight) * Number(set.reps.toString().split("-")[0]) : 0),
+              0,
+            ),
+          0,
+        ),
       }
+
+      console.log("Saving workout log:", workoutLog)
 
       // Get existing logs
       const existingLogsJson = await AsyncStorage.getItem("workoutLogs")
-      const existingLogs = existingLogsJson ? JSON.parse(existingLogsJson) : []
+      let existingLogs = []
+
+      if (existingLogsJson) {
+        try {
+          existingLogs = JSON.parse(existingLogsJson)
+          if (!Array.isArray(existingLogs)) {
+            console.error("Existing logs is not an array:", existingLogs)
+            existingLogs = []
+          }
+        } catch (parseError) {
+          console.error("Error parsing existing logs:", parseError)
+        }
+      }
 
       // Add new log
       const updatedLogs = [workoutLog, ...existingLogs]
 
       // Save to storage
       await AsyncStorage.setItem("workoutLogs", JSON.stringify(updatedLogs))
+      console.log("Workout log saved successfully. Total logs:", updatedLogs.length)
 
       // Navigate back
-      Alert.alert("Workout Complete", "Great job! Your workout has been saved.", [
-        { text: "OK", onPress: () => navigation.navigate("WorkoutTab") },
+      Alert.alert("Workout Complete", "Great job! Your workout has been saved to your log.", [
+        { text: "View Log", onPress: () => navigation.navigate("LogTab") },
+        { text: "Close", onPress: () => navigation.navigate("WorkoutTab") },
       ])
     } catch (error) {
       console.error("Error saving workout log:", error)
@@ -733,19 +764,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: -16,
     left: 0,
-  },
-  startButton: {
-    backgroundColor: "cyan",
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    flex: 1,
-    marginRight: 10,
-    // Fixed height for iOS with proper Platform check
-    height: Platform && Platform.OS === "ios" ? 44 : "auto",
-    // Ensure proper alignment
-    alignItems: "center",
-    justifyContent: "center",
   },
 })
 

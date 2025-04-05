@@ -91,6 +91,9 @@ const LoginScreen = ({ navigation }) => {
     }
   }
 
+  // Define the logo source directly to ensure it's properly loaded
+  const logoSource = require("../assets/logo.png")
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -102,7 +105,8 @@ const LoginScreen = ({ navigation }) => {
           <View style={styles.contentContainer}>
             <View style={styles.logoContainer}>
               <View style={styles.logoWrapper}>
-                <Image source={require("../assets/logo.png")} style={styles.logo} resizeMode="contain" />
+                {/* Use the directly defined source */}
+                <Image source={logoSource} style={styles.logo} resizeMode="contain" />
               </View>
               <Text style={styles.appName}>BetterU</Text>
             </View>

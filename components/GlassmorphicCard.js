@@ -1,4 +1,8 @@
-import { View, StyleSheet, Platform } from "react-native"
+import { View, StyleSheet, Platform, Dimensions } from "react-native"
+
+// Get screen dimensions for responsive design
+const { width, height } = Dimensions.get("window")
+const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 
 const GlassmorphicCard = ({
   children,
@@ -14,7 +18,7 @@ const GlassmorphicCard = ({
 
   // Add a check for width in the style prop
   const containerStyle = {
-    borderRadius: 15,
+    borderRadius: radius,
     overflow: "hidden",
     width: "100%", // Ensure cards take full width
     ...style,
@@ -23,7 +27,7 @@ const GlassmorphicCard = ({
   // Update the inner content style
   const innerContentStyle = {
     backgroundColor: "transparent",
-    padding: 15,
+    padding: Platform.OS === "ios" ? 10 : 12, // Reduced padding for more compact cards
     width: "100%",
   }
 
@@ -37,7 +41,8 @@ const GlassmorphicCard = ({
           borderRadius: radius,
         },
         // Add iOS-specific styles
-        Platform && Platform.OS === "ios" && styles.iosCard,
+        Platform.OS === "ios" && styles.iosCard,
+        containerStyle,
       ]}
     >
       <View style={innerContentStyle}>{children}</View>

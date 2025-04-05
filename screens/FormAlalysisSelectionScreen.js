@@ -1,7 +1,16 @@
 "use client"
 
 import { useState } from "react"
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from "react-native"
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import GlassmorphicCard from "../components/GlassmorphicCard"
 import * as ImagePicker from "expo-image-picker"
@@ -196,87 +205,99 @@ const FormAnalysisSelectionScreen = ({ navigation }) => {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Form Analysis</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+    >
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="white" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Form Analysis</Text>
+          <View style={{ width: 24 }} />
+        </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.subtitle}>Select an exercise to analyze</Text>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.subtitle}>Select an exercise to analyze</Text>
 
-        <View style={styles.exercisesContainer}>
-          {exercises.map((exercise) => (
-            <TouchableOpacity
-              key={exercise.id}
-              style={[styles.exerciseCard, selectedExercise?.id === exercise.id && styles.selectedExerciseCard]}
-              onPress={() => handleExerciseSelect(exercise)}
-            >
-              <View style={styles.exerciseIconContainer}>
-                <Ionicons
-                  name={exercise.icon}
-                  size={24}
-                  color={selectedExercise?.id === exercise.id ? "black" : "cyan"}
+          <View style={styles.exercisesContainer}>
+            {exercises.map((exercise) => (
+              <TouchableOpacity
+                key={exercise.id}
+                style={[styles.exerciseCard, selectedExercise?.id === exercise.id && styles.selectedExerciseCard]}
+                onPress={() => handleExerciseSelect(exercise)}
+              >
+                <View style={styles.exerciseIconContainer}>
+                  <Ionicons
+                    name={exercise.icon}
+                    size={24}
+                    color={selectedExercise?.id === exercise.id ? "black" : "cyan"}
+                  />
+                </View>
+                <Text
+                  style={[styles.exerciseName, selectedExercise?.id === exercise.id && styles.selectedExerciseName]}
+                >
+                  {exercise.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {selectedExercise && (
+            <GlassmorphicCard style={styles.selectedExerciseInfo}>
+              <Text style={styles.selectedExerciseTitle}>{selectedExercise.name} Form Analysis</Text>
+              <Text style={styles.selectedExerciseDescription}>{selectedExercise.description}</Text>
+
+              <View style={styles.videoContainer}>
+                <VideoPlayer
+                  uri={videoUri}
+                  style={styles.videoPlayer}
+                  uploadStatus={uploadStatus}
+                  uploadProgress={uploadProgress}
+                  isUploading={isUploading}
+                  onUploadStatusDismiss={() => setUploadStatus(null)}
                 />
               </View>
-              <Text style={[styles.exerciseName, selectedExercise?.id === exercise.id && styles.selectedExerciseName]}>
-                {exercise.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
 
-        {selectedExercise && (
-          <GlassmorphicCard style={styles.selectedExerciseInfo}>
-            <Text style={styles.selectedExerciseTitle}>{selectedExercise.name} Form Analysis</Text>
-            <Text style={styles.selectedExerciseDescription}>{selectedExercise.description}</Text>
+              <View style={styles.videoButtonsContainer}>
+                <TouchableOpacity style={styles.videoButton} onPress={recordVideo} disabled={isUploading}>
+                  <Ionicons name="videocam" size={20} color="black" />
+                  <Text style={styles.videoButtonText}>Record</Text>
+                </TouchableOpacity>
 
-            <View style={styles.videoContainer}>
-              <VideoPlayer
-                uri={videoUri}
-                style={styles.videoPlayer}
-                uploadStatus={uploadStatus}
-                uploadProgress={uploadProgress}
-                isUploading={isUploading}
-                onUploadStatusDismiss={() => setUploadStatus(null)}
-              />
-            </View>
+                <TouchableOpacity style={styles.videoButton} onPress={pickVideo} disabled={isUploading}>
+                  <Ionicons name="cloud-upload" size={20} color="black" />
+                  <Text style={styles.videoButtonText}>Upload</Text>
+                </TouchableOpacity>
+              </View>
 
-            <View style={styles.videoButtonsContainer}>
-              <TouchableOpacity style={styles.videoButton} onPress={recordVideo} disabled={isUploading}>
-                <Ionicons name="videocam" size={20} color="black" />
-                <Text style={styles.videoButtonText}>Record</Text>
+              <TouchableOpacity
+                style={[styles.continueButton, (!videoUri || isUploading) && styles.disabledButton]}
+                onPress={handleContinue}
+                disabled={!videoUri || isUploading}
+              >
+                <Text style={styles.continueButtonText}>Continue to Analysis</Text>
+                <Ionicons name="arrow-forward" size={20} color="black" />
               </TouchableOpacity>
+            </GlassmorphicCard>
+          )}
 
-              <TouchableOpacity style={styles.videoButton} onPress={pickVideo} disabled={isUploading}>
-                <Ionicons name="cloud-upload" size={20} color="black" />
-                <Text style={styles.videoButtonText}>Upload</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.continueButton, (!videoUri || isUploading) && styles.disabledButton]}
-              onPress={handleContinue}
-              disabled={!videoUri || isUploading}
-            >
-              <Text style={styles.continueButtonText}>Continue to Analysis</Text>
-              <Ionicons name="arrow-forward" size={20} color="black" />
-            </TouchableOpacity>
-          </GlassmorphicCard>
-        )}
-
-        <View style={styles.infoContainer}>
-          <Ionicons name="information-circle-outline" size={20} color="#aaa" />
-          <Text style={styles.infoText}>
-            Upload a video of your exercise form and our AI trainer will provide personalized feedback to help you
-            improve.
-          </Text>
-        </View>
-      </ScrollView>
-    </View>
+          <View style={styles.infoContainer}>
+            <Ionicons name="information-circle-outline" size={20} color="#aaa" />
+            <Text style={styles.infoText}>
+              Upload a video of your exercise form and our AI trainer will provide personalized feedback to help you
+              improve.
+            </Text>
+          </View>
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
   )
 }
 

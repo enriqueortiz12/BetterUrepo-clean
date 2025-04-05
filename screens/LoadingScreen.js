@@ -2,29 +2,25 @@
 
 import { useState, useEffect } from "react"
 import { View, Text, StyleSheet, Dimensions, Animated, Easing } from "react-native"
-import { useNavigation } from "@react-navigation/native"
 import Icon from "react-native-vector-icons/FontAwesome"
 
 const { width, height } = Dimensions.get("window")
 
-const LoadingScreen = ({ route }) => {
-  const navigation = useNavigation()
-  // Safety check for navigation
-  useEffect(() => {
-    if (!navigation) {
-      console.warn("Navigation object not found. Make sure LoadingScreen is inside a NavigationContainer.")
-    }
-  }, [navigation])
-  const { nextScreen, nextScreenParams } = route.params || {}
+const LoadingScreen = ({ route, navigation, directNavigation }) => {
+  // Extract params from route or from direct props
+  const { nextScreen, nextScreenParams } = route?.params || {}
 
   const [loadingDots, setLoadingDots] = useState("")
-  const [motivationalText, setMotivationalText] = useState("") // Declare setMotivationalText
+  const [motivationalText, setMotivationalText] = useState("")
   const logoAnim = useState(new Animated.Value(1))[0]
   const glowAnim = useState(new Animated.Value(0.3))[0]
   const rotateAnim = useState(new Animated.Value(0))[0]
   const fadeAnim = useState(new Animated.Value(0))[0]
   const scaleAnim = useState(new Animated.Value(0.5))[0]
   const progressAnim = useState(new Animated.Value(0))[0]
+
+  // Define the logo source directly
+  const logoSource = require("../assets/fitnessLogo.png")
 
   // Fitness icons data
   const fitnessIcons = [
@@ -44,7 +40,27 @@ const LoadingScreen = ({ route }) => {
     rotation: new Animated.Value(0),
   }))
 
-  // Fix for React Hook useEffect has missing dependencies
+  // Navigate function that works with both direct and route navigation
+  const navigateToNext = () => {
+    if (directNavigation) {
+      // Use the direct navigation function if provided
+      directNavigation(nextScreen || "Main", nextScreenParams || {})
+    } else if (navigation) {
+      // Use the navigation prop if available
+      if (nextScreen) {
+        navigation.replace(nextScreen, nextScreenParams || {})
+      } else {
+        if (navigation.canGoBack()) {
+          navigation.goBack()
+        } else {
+          navigation.replace("Main")
+        }
+      }
+    } else {
+      console.warn("No navigation method available")
+    }
+  }
+
   useEffect(() => {
     // Define motivationalPhrases inside the effect to avoid dependency issues
     const motivationalPhrases = [
@@ -179,39 +195,19 @@ const LoadingScreen = ({ route }) => {
 
     // Navigate to the next screen after a delay
     const timer = setTimeout(() => {
-      if (nextScreen) {
-        navigation.replace(nextScreen, nextScreenParams || {})
-      } else {
-        // If no nextScreen is provided, go back or navigate to a default screen
-        if (navigation.canGoBack()) {
-          navigation.goBack()
-        } else {
-          navigation.replace("Main")
-        }
-      }
+      navigateToNext()
     }, 4000)
 
     return () => {
       clearTimeout(timer)
       clearInterval(dotsInterval)
     }
-  }, [
-    fadeAnim,
-    glowAnim,
-    iconAnims,
-    logoAnim,
-    navigation,
-    nextScreen,
-    nextScreenParams,
-    progressAnim,
-    rotateAnim,
-    scaleAnim,
-  ])
+  }, [fadeAnim, glowAnim, iconAnims, logoAnim, progressAnim, rotateAnim, scaleAnim])
 
   return (
     <View style={styles.container}>
       <Animated.Image
-        source={require("../assets/fitnessLogo.png")}
+        source={logoSource}
         style={[
           styles.logo,
           {
