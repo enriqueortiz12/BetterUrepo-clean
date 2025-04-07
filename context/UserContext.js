@@ -2,7 +2,7 @@
 
 import { createContext, useState, useContext, useEffect } from "react"
 import AsyncStorage from "@react-native-async-storage/async-storage"
-import { initialPRs } from "../data/prData"
+import { supabase } from "../lib/supabase"
 
 // Create user context
 const UserContext = createContext({})
@@ -32,43 +32,13 @@ export const UserProvider = ({ children }) => {
           setUserProfile(JSON.parse(profileData))
         }
 
-        // Load PRs
-        const prData = await AsyncStorage.getItem("personalRecords")
-        console.log("Raw PR data from storage:", prData)
-
-        if (prData) {
-          try {
-            const parsedData = JSON.parse(prData)
-            console.log("Parsed PR data:", parsedData)
-
-            if (Array.isArray(parsedData) && parsedData.length > 0) {
-              setPersonalRecords(parsedData)
-            } else {
-              console.log("PR data is empty or not an array, initializing with defaults")
-              setPersonalRecords(initialPRs)
-              await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
-            }
-          } catch (parseError) {
-            console.error("Error parsing PR data:", parseError)
-            setPersonalRecords(initialPRs)
-            await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
-          }
-        } else {
-          // Initialize with default PRs if none exist
-          console.log("No PR data found, initializing with defaults:", initialPRs)
-          setPersonalRecords(initialPRs)
-          await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
-        }
+        // Load PRs from Supabase instead of AsyncStorage
+        await loadPersonalRecordsFromSupabase()
       } catch (error) {
         console.error("Error loading user data:", error)
-        // Initialize with default PRs on error
-        console.log("Error loading data, initializing with defaults")
-        setPersonalRecords(initialPRs)
-        try {
-          await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
-        } catch (storageError) {
-          console.error("Error saving initial PRs:", storageError)
-        }
+        // Initialize with empty array on error instead of default PRs
+        console.log("Error loading data, initializing with empty array")
+        setPersonalRecords([])
       } finally {
         setIsLoading(false)
       }
@@ -76,6 +46,99 @@ export const UserProvider = ({ children }) => {
 
     loadUserData()
   }, [])
+
+  // Update the loadPersonalRecordsFromSupabase function to properly handle RLS
+  const loadPersonalRecordsFromSupabase = async () => {
+    try {
+      // Get the current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        console.log("No authenticated user found, using empty PR array")
+        setPersonalRecords([])
+        return
+      }
+
+      // Fetch PRs from Supabase - make sure we're using the authenticated client
+      const { data, error } = await supabase
+        .from("personal_records")
+        .select("*")
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Error fetching PRs from Supabase:", error)
+        // Fall back to empty array
+        setPersonalRecords([])
+        return
+      }
+
+      if (data && data.length > 0) {
+        console.log("Loaded PRs from Supabase:", data.length)
+
+        // Check if we have any local PRs in AsyncStorage
+        const localPRsJson = await AsyncStorage.getItem("personalRecords")
+        let localPRs = []
+
+        if (localPRsJson) {
+          try {
+            localPRs = JSON.parse(localPRsJson)
+          } catch (e) {
+            console.error("Error parsing local PRs:", e)
+          }
+        }
+
+        // If we have local PRs, we need to map the IDs
+        if (Array.isArray(localPRs) && localPRs.length > 0) {
+          console.log("Found local PRs, mapping IDs...")
+
+          // Create a map of exercise names to Supabase UUIDs
+          const exerciseToUUIDMap = {}
+          data.forEach((pr) => {
+            exerciseToUUIDMap[pr.exercise] = pr.id
+          })
+
+          // Update local PRs with Supabase UUIDs where possible
+          const updatedLocalPRs = localPRs.map((localPR) => {
+            if (exerciseToUUIDMap[localPR.exercise]) {
+              return {
+                ...localPR,
+                id: exerciseToUUIDMap[localPR.exercise],
+              }
+            }
+            return localPR
+          })
+
+          // Save the updated local PRs back to AsyncStorage
+          await AsyncStorage.setItem("personalRecords", JSON.stringify(updatedLocalPRs))
+        }
+
+        setPersonalRecords(data)
+      } else {
+        console.log("No PRs found in Supabase, initializing with empty array")
+        // If no PRs exist yet, initialize with empty array instead of defaults
+        setPersonalRecords([])
+      }
+    } catch (error) {
+      console.error("Error in loadPersonalRecordsFromSupabase:", error)
+      setPersonalRecords([])
+    }
+  }
+
+  // Initialize default PRs in Supabase - MODIFIED to not add default PRs
+  const initializeDefaultPRs = async (userId) => {
+    try {
+      // Instead of adding default PRs, we'll just set an empty array
+      console.log("Initializing with empty PR array for user:", userId)
+      setPersonalRecords([])
+      return { success: true }
+    } catch (error) {
+      console.error("Error in initializeDefaultPRs:", error)
+      setPersonalRecords([])
+      return { success: false, error: error.message }
+    }
+  }
 
   // Save profile changes
   const updateProfile = async (newProfile) => {
@@ -90,67 +153,304 @@ export const UserProvider = ({ children }) => {
     }
   }
 
-  // Add a new PR
+  // Add a new PR - Updated to use Supabase
   const addPersonalRecord = async (newPR) => {
     try {
-      const prWithId = {
-        ...newPR,
-        id: Date.now().toString(),
-        date: new Date().toISOString().split("T")[0],
+      // Get the current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        return { success: false, error: "No authenticated user found" }
       }
 
-      const updatedPRs = [...personalRecords, prWithId]
-      console.log("Adding new PR:", prWithId)
-      console.log("Updated PRs:", updatedPRs)
+      // Prepare PR data with user_id
+      const prData = {
+        ...newPR,
+        user_id: user.id,
+        date: new Date().toISOString().split("T")[0], // Format as YYYY-MM-DD
+      }
 
-      setPersonalRecords(updatedPRs)
-      await AsyncStorage.setItem("personalRecords", JSON.stringify(updatedPRs))
-      return { success: true }
+      // Insert into Supabase
+      const { data, error } = await supabase.from("personal_records").insert(prData).select()
+
+      if (error) {
+        console.error("Error adding PR to Supabase:", error)
+        return { success: false, error: error.message }
+      }
+
+      // Update local state
+      const newRecord = data[0]
+      setPersonalRecords((prevRecords) => [newRecord, ...prevRecords])
+
+      return { success: true, data: newRecord }
     } catch (error) {
-      console.error("Error adding PR:", error)
+      console.error("Error in addPersonalRecord:", error)
       return { success: false, error: error.message }
     }
   }
 
-  // Update an existing PR
+  // Update an existing PR - Updated to use Supabase
   const updatePersonalRecord = async (prId, updatedData) => {
     try {
-      const updatedPRs = personalRecords.map((pr) => (pr.id === prId ? { ...pr, ...updatedData } : pr))
+      // Get the current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-      setPersonalRecords(updatedPRs)
-      await AsyncStorage.setItem("personalRecords", JSON.stringify(updatedPRs))
-      return { success: true }
+      if (!user) {
+        return { success: false, error: "No authenticated user found" }
+      }
+
+      // Check if the ID is a UUID or a simple ID
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(prId)
+
+      if (!isUUID) {
+        console.log("Non-UUID ID detected:", prId)
+
+        // For non-UUID IDs, we need to find the record by exercise name instead
+        // First, get the current PR to find its exercise name
+        const prToUpdate = personalRecords.find((pr) => pr.id === prId)
+
+        if (!prToUpdate) {
+          return { success: false, error: "PR record not found" }
+        }
+
+        // Try to find the record in Supabase by exercise name
+        const { data: existingRecords, error: fetchError } = await supabase
+          .from("personal_records")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("exercise", prToUpdate.exercise)
+
+        if (fetchError) {
+          console.error("Error fetching PR by exercise:", fetchError)
+          return { success: false, error: fetchError.message }
+        }
+
+        if (existingRecords && existingRecords.length > 0) {
+          // Update the existing record
+          const { data, error } = await supabase
+            .from("personal_records")
+            .update(updatedData)
+            .eq("id", existingRecords[0].id)
+            .eq("user_id", user.id)
+            .select()
+
+          if (error) {
+            console.error("Error updating PR in Supabase:", error)
+            return { success: false, error: error.message }
+          }
+
+          // Update local state with the new data
+          setPersonalRecords((prevRecords) =>
+            prevRecords.map((pr) => (pr.id === prId ? { ...pr, ...updatedData, id: existingRecords[0].id } : pr)),
+          )
+
+          return { success: true, data: data[0] }
+        } else {
+          // If no record found, create a new one
+          const newPrData = {
+            ...prToUpdate,
+            ...updatedData,
+            user_id: user.id,
+            date: new Date().toISOString().split("T")[0],
+          }
+
+          // Remove the old ID to let Supabase generate a new UUID
+          delete newPrData.id
+
+          const { data, error } = await supabase.from("personal_records").insert(newPrData).select()
+
+          if (error) {
+            console.error("Error creating new PR in Supabase:", error)
+            return { success: false, error: error.message }
+          }
+
+          // Update local state
+          setPersonalRecords((prevRecords) => prevRecords.map((pr) => (pr.id === prId ? data[0] : pr)))
+
+          return { success: true, data: data[0] }
+        }
+      }
+
+      // For UUID IDs, proceed with normal update
+      const { data, error } = await supabase
+        .from("personal_records")
+        .update(updatedData)
+        .eq("id", prId)
+        .eq("user_id", user.id)
+        .select()
+
+      if (error) {
+        console.error("Error updating PR in Supabase:", error)
+        return { success: false, error: error.message }
+      }
+
+      // Update local state
+      setPersonalRecords((prevRecords) => prevRecords.map((pr) => (pr.id === prId ? data[0] : pr)))
+
+      return { success: true, data: data[0] }
     } catch (error) {
-      console.error("Error updating PR:", error)
+      console.error("Error in updatePersonalRecord:", error)
       return { success: false, error: error.message }
     }
   }
 
-  // Delete a PR
+  // Delete a PR - Updated to use Supabase
   const deletePersonalRecord = async (prId) => {
     try {
-      const updatedPRs = personalRecords.filter((pr) => pr.id !== prId)
-      setPersonalRecords(updatedPRs)
-      await AsyncStorage.setItem("personalRecords", JSON.stringify(updatedPRs))
+      // Get the current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        return { success: false, error: "No authenticated user found" }
+      }
+
+      // Check if the ID is a UUID or a simple ID
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(prId)
+
+      if (!isUUID) {
+        console.log("Non-UUID ID detected for deletion:", prId)
+
+        // For non-UUID IDs, we need to find the record by exercise name instead
+        const prToDelete = personalRecords.find((pr) => pr.id === prId)
+
+        if (!prToDelete) {
+          return { success: false, error: "PR record not found" }
+        }
+
+        // Try to find the record in Supabase by exercise name
+        const { data: existingRecords, error: fetchError } = await supabase
+          .from("personal_records")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("exercise", prToDelete.exercise)
+
+        if (fetchError) {
+          console.error("Error fetching PR by exercise for deletion:", fetchError)
+          return { success: false, error: fetchError.message }
+        }
+
+        if (existingRecords && existingRecords.length > 0) {
+          // Delete the existing record
+          const { error } = await supabase
+            .from("personal_records")
+            .delete()
+            .eq("id", existingRecords[0].id)
+            .eq("user_id", user.id)
+
+          if (error) {
+            console.error("Error deleting PR from Supabase:", error)
+            return { success: false, error: error.message }
+          }
+        }
+
+        // Update local state regardless of whether we found it in Supabase
+        setPersonalRecords((prevRecords) => prevRecords.filter((pr) => pr.id !== prId))
+
+        return { success: true }
+      }
+
+      // For UUID IDs, proceed with normal delete
+      const { error } = await supabase.from("personal_records").delete().eq("id", prId).eq("user_id", user.id)
+
+      if (error) {
+        console.error("Error deleting PR from Supabase:", error)
+        return { success: false, error: error.message }
+      }
+
+      // Update local state
+      setPersonalRecords((prevRecords) => prevRecords.filter((pr) => pr.id !== prId))
+
       return { success: true }
     } catch (error) {
-      console.error("Error deleting PR:", error)
+      console.error("Error in deletePersonalRecord:", error)
       return { success: false, error: error.message }
     }
   }
 
-  // Reset PRs to initial data (for debugging)
+  // Reset PRs to initial data (for debugging) - Updated to use Supabase
   const resetPersonalRecords = async () => {
     try {
-      setPersonalRecords(initialPRs)
-      await AsyncStorage.setItem("personalRecords", JSON.stringify(initialPRs))
+      // Get the current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        return { success: false, error: "No authenticated user found" }
+      }
+
+      // First delete all existing records
+      const { error: deleteError } = await supabase.from("personal_records").delete().eq("user_id", user.id)
+
+      if (deleteError) {
+        console.error("Error deleting existing PRs:", deleteError)
+        return { success: false, error: deleteError.message }
+      }
+
+      // Set to empty array instead of initializing with default PRs
+      setPersonalRecords([])
+
       return { success: true }
     } catch (error) {
-      console.error("Error resetting PRs:", error)
+      console.error("Error in resetPersonalRecords:", error)
       return { success: false, error: error.message }
     }
   }
 
+  // Add this debug function to the UserContext
+  const debugPRData = async () => {
+    try {
+      // Get the current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        console.log("No authenticated user found")
+        return { success: false, error: "No authenticated user found" }
+      }
+
+      // Fetch PRs from Supabase
+      const { data, error } = await supabase.from("personal_records").select("*").eq("user_id", user.id)
+
+      if (error) {
+        console.error("Error fetching PRs from Supabase:", error)
+        return { success: false, error: error.message }
+      }
+
+      // Get local PRs
+      const localPRsJson = await AsyncStorage.getItem("personalRecords")
+      let localPRs = []
+
+      if (localPRsJson) {
+        try {
+          localPRs = JSON.parse(localPRsJson)
+        } catch (e) {
+          console.error("Error parsing local PRs:", e)
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          supabasePRs: data,
+          localPRs: localPRs,
+          currentState: personalRecords,
+        },
+      }
+    } catch (error) {
+      console.error("Error in debugPRData:", error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  // Add debugPRData to the context value
   const contextValue = {
     userProfile,
     updateProfile,
@@ -160,6 +460,7 @@ export const UserProvider = ({ children }) => {
     deletePersonalRecord,
     resetPersonalRecords,
     isLoading,
+    debugPRData, // Add this line
   }
 
   return <UserContext.Provider value={contextValue}>{children}</UserContext.Provider>

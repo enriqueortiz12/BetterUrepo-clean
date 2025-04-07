@@ -1,17 +1,19 @@
 "use client"
 
-import React from "react"
+import React, { useState } from "react"
 import { NavigationContainer } from "@react-navigation/native"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
-import { View, Text, StyleSheet, ActivityIndicator, Image, Platform, Dimensions } from "react-native"
+import { View, Text, StyleSheet, ActivityIndicator, Platform, Dimensions } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { supabase } from "./lib/supabase"
 
 // Import context providers and hooks
 import { AuthProvider, useAuth } from "./context/AuthContext"
 import { UserProvider } from "./context/UserContext"
 import { TrainerProvider } from "./context/TrainerContext"
+
+// Import image utilities
+import { LogoImage, preloadImages } from "./utils/imageUtils"
 
 // Auth Screens
 import LoginScreen from "./screens/LoginScreen"
@@ -40,6 +42,15 @@ import ActiveWorkoutScreen from "./screens/ActiveWorkoutScreen"
 import WorkoutLogScreen from "./screens/WorkoutLogScreen"
 import FormAnalysisSelectionScreen from "./screens/FormAnalysisSelectionScreen"
 
+// Add the import for MentalWellnessScreen at the top of the file with the other screen imports:
+import MentalWellnessScreen from "./screens/MentalWellnessScreen"
+
+// Add the import for SessionDetailScreen at the top of the file with the other screen imports:
+import SessionDetailScreen from "./screens/SessionDetailScreen"
+
+// Add the import for SettingsScreen at the top of the file with the other screen imports:
+import SettingsScreen from "./screens/SettingsScreen"
+
 // Get screen dimensions for responsive design
 const { width, height } = Dimensions.get("window")
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
@@ -60,14 +71,14 @@ const MainTabs = () => {
             iconName = focused ? "home" : "home-outline"
           } else if (route.name === "WorkoutTab") {
             iconName = focused ? "barbell" : "barbell-outline"
+          } else if (route.name === "MentalTab") {
+            iconName = focused ? "leaf" : "leaf-outline"
           } else if (route.name === "TrainerTab") {
             iconName = focused ? "fitness" : "fitness-outline"
           } else if (route.name === "PRTab") {
             iconName = focused ? "trophy" : "trophy-outline"
           } else if (route.name === "ProfileTab") {
             iconName = focused ? "person" : "person-outline"
-          } else if (route.name === "LogTab") {
-            iconName = focused ? "list" : "list-outline"
           }
 
           // Always return a valid component
@@ -98,9 +109,9 @@ const MainTabs = () => {
     >
       <Tab.Screen name="HomeTab" component={HomeScreen} options={{ tabBarLabel: "Home" }} />
       <Tab.Screen name="WorkoutTab" component={WorkoutScreen} options={{ tabBarLabel: "Workouts" }} />
+      <Tab.Screen name="MentalTab" component={MentalWellnessScreen} options={{ tabBarLabel: "Mental" }} />
       <Tab.Screen name="TrainerTab" component={TrainerScreen} options={{ tabBarLabel: "AI Trainer" }} />
       <Tab.Screen name="PRTab" component={PRScreen} options={{ tabBarLabel: "PRs" }} />
-      <Tab.Screen name="LogTab" component={WorkoutLogScreen} options={{ tabBarLabel: "Log" }} />
       <Tab.Screen name="ProfileTab" component={ProfileScreen} options={{ tabBarLabel: "Profile" }} />
     </Tab.Navigator>
   )
@@ -108,13 +119,10 @@ const MainTabs = () => {
 
 // Initial loading component
 const InitialLoading = () => {
-  // Define the logo source directly
-  const logoSource = require("./assets/logo.png")
-
   return (
     <View style={styles.loadingContainer}>
       <View style={styles.logoContainer}>
-        <Image source={logoSource} style={styles.logo} resizeMode="contain" />
+        <LogoImage style={styles.logo} />
       </View>
       <ActivityIndicator size="large" color="#0099ff" />
       <Text style={styles.loadingText}>Loading BetterU...</Text>
@@ -124,81 +132,44 @@ const InitialLoading = () => {
 
 // This component will be rendered inside NavigationContainer
 const MainNavigator = () => {
-  const { user, loading: authLoading } = useAuth()
-  const [initialRoute, setInitialRoute] = React.useState(null)
-  const [isChecking, setIsChecking] = React.useState(true)
+  const { user, isLoading: authLoading } = useAuth()
+  const [initialRoute, setInitialRoute] = useState(null)
+  const [isReady, setIsReady] = useState(false)
 
-  // Function to handle direct navigation without using hooks
-  const handleDirectNavigation = (screen, params = {}) => {
-    setInitialRoute(screen)
-    setIsChecking(false)
-  }
-
-  // Check if we need to redirect to onboarding
-  const checkProfileCompleteness = React.useCallback(async () => {
-    if (user) {
-      try {
-        const { data, error } = await supabase.from("profiles").select("*").eq("user_id", user.id).single()
-
-        if (error && error.code !== "PGRST116") {
-          console.error("Error checking profile:", error)
-          return false
-        }
-
-        // Check if profile is incomplete
-        const isProfileIncomplete =
-          !data || !data.full_name || !data.age || !data.weight || !data.fitness_goal || !data.gender || !data.height
-
-        return isProfileIncomplete
-      } catch (error) {
-        console.error("Error in profile check:", error)
-        return false
-      }
-    }
-    return false
-  }, [user])
-
+  // Simplify the navigation logic
   React.useEffect(() => {
-    const determineInitialRoute = async () => {
-      if (!user) {
-        console.log("No user, setting initial route to Login")
-        setInitialRoute("Login")
-        setIsChecking(false)
-        return
-      }
+    console.log("MainNavigator: Determining initial route, auth loading:", authLoading)
 
+    const setupNavigation = async () => {
       try {
-        const needsOnboarding = await checkProfileCompleteness()
-        console.log("Profile completeness check result:", needsOnboarding)
-
-        if (needsOnboarding) {
-          console.log("Profile incomplete, setting initial route to Onboarding")
-          setInitialRoute("Onboarding")
+        if (!user) {
+          console.log("MainNavigator: No user, setting route to Login")
+          setInitialRoute("Login")
         } else {
-          console.log("Profile complete, setting initial route to Main")
+          console.log("MainNavigator: User found, setting route to Main")
           setInitialRoute("Main")
         }
       } catch (error) {
-        console.error("Error determining initial route:", error)
-        // Default to Main on error
-        setInitialRoute("Main")
+        console.error("MainNavigator: Error setting up navigation:", error)
+        // Default to Main on error if user exists, Login otherwise
+        setInitialRoute(user ? "Main" : "Login")
       } finally {
-        setIsChecking(false)
+        setIsReady(true)
       }
     }
 
     if (!authLoading) {
-      determineInitialRoute()
+      setupNavigation()
     }
-  }, [user, authLoading, checkProfileCompleteness])
+  }, [user, authLoading])
 
-  if (authLoading || isChecking) {
+  // Show loading screen until everything is ready
+  if (authLoading || !isReady) {
     return (
-      <LoadingScreen
-        directNavigation={handleDirectNavigation}
-        nextScreen={user ? "Main" : "Login"}
-        nextScreenParams={{}}
-      />
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#121212" }}>
+        <ActivityIndicator size="large" color="#0099ff" />
+        <Text style={{ color: "white", marginTop: 10 }}>Loading...</Text>
+      </View>
     )
   }
 
@@ -222,6 +193,9 @@ const MainNavigator = () => {
           <Stack.Screen name="WorkoutAnalysis" component={WorkoutAnalysisScreen} />
           <Stack.Screen name="WorkoutRecommendation" component={WorkoutRecommendationScreen} />
           <Stack.Screen name="ActiveWorkout" component={ActiveWorkoutScreen} />
+          <Stack.Screen name="WorkoutLog" component={WorkoutLogScreen} />
+          <Stack.Screen name="SessionDetail" component={SessionDetailScreen} />
+          <Stack.Screen name="Settings" component={SettingsScreen} />
         </>
       ) : (
         // Unauthenticated routes
@@ -247,6 +221,11 @@ const AppNavigator = () => {
     }, 2000)
 
     return () => clearTimeout(timer)
+  }, [])
+
+  React.useEffect(() => {
+    // Preload images when the app starts
+    preloadImages()
   }, [])
 
   if (initialLoading) {
@@ -282,15 +261,22 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     marginBottom: 20,
-  },
-  logo: {
     width: 200,
     height: 200,
+    justifyContent: "center",
+    alignItems: "center",
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
     color: "#fff",
+  },
+  errorText: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#ff6b6b",
+    textAlign: "center",
+    paddingHorizontal: 20,
   },
 })
 

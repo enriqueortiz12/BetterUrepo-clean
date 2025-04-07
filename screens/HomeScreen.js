@@ -6,125 +6,714 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Image,
   ActivityIndicator,
   Platform,
   Dimensions,
   SafeAreaView,
+  TouchableOpacity,
+  Image,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { useUser } from "../context/UserContext"
 import { workoutCategories } from "../data/workoutData"
 import { trainingStyles } from "../data/trainingStylesData"
 import GlassmorphicCard from "../components/GlassmorphicCard"
 import ScrollableFilters from "../components/ScrollableFilters"
 import HoverButton from "../components/HoverButton"
 import AsyncStorage from "@react-native-async-storage/async-storage"
+import { supabase } from "../lib/supabase"
+import { LogoFallback } from "../assets/logo"
+// Add this import at the top
+import Button from "../components/Button"
 
 // Get screen dimensions for responsive design
 const { width, height } = Dimensions.get("window")
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 
 const HomeScreen = ({ navigation }) => {
-  // Update the destructuring of userProfile with a default empty object
-  const { userProfile = {} } = useUser() || { userProfile: {} }
+  // Local state management
+  const [user, setUser] = useState(null)
+  const [userProfile, setUserProfile] = useState({})
   const [stats, setStats] = useState({
     workouts: 0,
     minutes: 0,
     prs: 0,
+    mentalSessions: 0,
     isLoading: true,
   })
+  const [loadingTimeout, setLoadingTimeout] = useState(false)
+  const [currentMood, setCurrentMood] = useState(null)
+  const [logoLoaded, setLogoLoaded] = useState(true)
 
-  // Function to calculate stats
-  const calculateStats = async () => {
+  // Load user data directly
+  useEffect(() => {
+    let isMounted = true
+    let timeoutId
+
+    const loadUserData = async () => {
+      try {
+        console.log("HomeScreen: Loading user data")
+
+        // Set a timeout to prevent infinite loading
+        timeoutId = setTimeout(() => {
+          if (isMounted) {
+            console.log("HomeScreen: Loading timeout reached, showing fallback data")
+            setLoadingTimeout(true)
+            setStats((prev) => ({ ...prev, isLoading: false }))
+          }
+        }, 3000) // 3 second timeout
+
+        // Get current user
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!isMounted) return
+
+        if (user) {
+          setUser(user)
+          console.log("HomeScreen: User found:", user.id)
+
+          // Try to get profile data
+          const { data: profileData, error } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("user_id", user.id)
+            .single()
+
+          if (!isMounted) return
+
+          if (error) {
+            console.error("HomeScreen: Error fetching profile:", error)
+            // Use fallback profile
+            setUserProfile({
+              name: user.email ? user.email.split("@")[0] : "User",
+              goal: "health",
+            })
+          } else {
+            console.log("HomeScreen: Profile loaded successfully")
+            setUserProfile({
+              name: profileData.full_name,
+              goal: profileData.fitness_goal,
+              email: profileData.email,
+              age: profileData.age,
+              weight: profileData.weight,
+              height: profileData.height,
+              trainingLevel: profileData.training_level || "intermediate",
+            })
+          }
+        } else {
+          console.log("HomeScreen: No user found")
+          setUserProfile({
+            name: "User",
+            goal: "health",
+          })
+        }
+
+        // Load current mood
+        const savedMood = await AsyncStorage.getItem("currentMood")
+        if (savedMood) {
+          setCurrentMood(JSON.parse(savedMood))
+        }
+
+        // Calculate stats regardless of user state
+        await fetchUserStats(user?.id)
+      } catch (error) {
+        console.error("HomeScreen: Error loading user data:", error)
+        // Use fallback data
+        if (isMounted) {
+          setUserProfile({
+            name: "User",
+            goal: "health",
+          })
+          setStats({
+            workouts: 0,
+            minutes: 0,
+            prs: 0,
+            mentalSessions: 0,
+            isLoading: false,
+          })
+        }
+      } finally {
+        // Clear timeout
+        if (timeoutId) clearTimeout(timeoutId)
+      }
+    }
+
+    loadUserData()
+
+    return () => {
+      isMounted = false
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [])
+
+  // Function to fetch user stats from the new user_stats table
+  const fetchUserStats = async (userId) => {
     try {
+      console.log("HomeScreen: Fetching user stats")
       setStats((prev) => ({ ...prev, isLoading: true }))
 
-      // Get workout logs
-      const workoutLogsJson = await AsyncStorage.getItem("workoutLogs")
-      let workoutLogs = []
-      if (workoutLogsJson) {
-        try {
-          workoutLogs = JSON.parse(workoutLogsJson)
-          if (!Array.isArray(workoutLogs)) workoutLogs = []
-        } catch (e) {
-          console.error("Error parsing workout logs:", e)
-          workoutLogs = []
-        }
-      }
-
-      // Get personal records
-      const personalRecordsJson = await AsyncStorage.getItem("personalRecords")
-      let personalRecords = []
-      if (personalRecordsJson) {
-        try {
-          personalRecords = JSON.parse(personalRecordsJson)
-          if (!Array.isArray(personalRecords)) personalRecords = []
-        } catch (e) {
-          console.error("Error parsing personal records:", e)
-          personalRecords = []
-        }
-      }
-
-      // Calculate total workouts
-      const totalWorkouts = workoutLogs.length
-
-      // Calculate total minutes
+      // Default stats in case of errors
+      let workoutCount = 0
       let totalMinutes = 0
-      workoutLogs.forEach((log) => {
-        if (log.duration) {
-          // Parse duration in format "MM:SS" or "HH:MM:SS"
-          const parts = log.duration.split(":").map(Number)
-          if (parts.length === 2) {
-            // MM:SS format
-            totalMinutes += parts[0]
-          } else if (parts.length === 3) {
-            // HH:MM:SS format
-            totalMinutes += parts[0] * 60 + parts[1]
-          }
-        }
-      })
+      let prsThisMonth = 0
+      let mentalSessionsCount = 0
 
-      // Calculate PRs this month
+      if (!userId) {
+        console.log("HomeScreen: No user ID, using default stats")
+        setStats({
+          workouts: 0,
+          minutes: 0,
+          prs: 0,
+          mentalSessions: 0,
+          isLoading: false,
+        })
+        return
+      }
+
+      // Get current month and year
       const currentDate = new Date()
-      const currentMonth = currentDate.getMonth()
+      const currentMonth = currentDate.getMonth() + 1 // JavaScript months are 0-indexed
       const currentYear = currentDate.getFullYear()
 
-      const prsThisMonth = personalRecords.filter((pr) => {
-        if (!pr.date) return false
-        const prDate = new Date(pr.date)
-        return prDate.getMonth() === currentMonth && prDate.getFullYear() === currentYear
-      }).length
+      // Try to get stats from user_stats table
+      const { data: userStats, error: statsError } = await supabase
+        .from("user_stats")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("current_month", currentMonth)
+        .eq("current_year", currentYear)
+        .single()
 
+      if (statsError && statsError.code !== "PGRST116") {
+        // Error other than "not found"
+        console.error("HomeScreen: Error fetching user stats:", statsError)
+      }
+
+      if (userStats) {
+        console.log("HomeScreen: Found user stats in database:", userStats)
+        // Use stats from database
+        workoutCount = userStats.total_workouts || 0
+        totalMinutes = userStats.total_minutes || 0
+        prsThisMonth = userStats.prs_this_month || 0
+        mentalSessionsCount = userStats.mental_sessions || 0
+      } else {
+        console.log("HomeScreen: No user stats found in database, calculating from raw data")
+
+        // Calculate stats from raw data
+        const calculatedStats = await calculateStatsFromRawData(userId, currentMonth, currentYear)
+        workoutCount = calculatedStats.workouts
+        totalMinutes = calculatedStats.minutes
+        prsThisMonth = calculatedStats.prs
+        mentalSessionsCount = calculatedStats.mentalSessions
+
+        // Save the calculated stats to the user_stats table
+        await saveUserStats(
+          userId,
+          workoutCount,
+          totalMinutes,
+          prsThisMonth,
+          mentalSessionsCount,
+          currentMonth,
+          currentYear,
+        )
+      }
+
+      // Update stats state
       setStats({
-        workouts: totalWorkouts,
+        workouts: workoutCount,
         minutes: totalMinutes,
         prs: prsThisMonth,
+        mentalSessions: mentalSessionsCount,
         isLoading: false,
       })
     } catch (error) {
-      console.error("Error calculating stats:", error)
+      console.error("HomeScreen: Error fetching user stats:", error)
+      // Set default stats on error
       setStats({
         workouts: 0,
         minutes: 0,
         prs: 0,
+        mentalSessions: 0,
         isLoading: false,
       })
     }
   }
 
-  // Calculate stats on initial load
-  useEffect(() => {
-    calculateStats()
-  }, [])
+  // Function to calculate stats from raw data (workout_logs and personal_records tables)
+  const calculateStatsFromRawData = async (userId, currentMonth, currentYear) => {
+    let workoutCount = 0
+    let totalMinutes = 0
+    let prsThisMonth = 0
+    let mentalSessionsCount = 0
+
+    try {
+      // Get workout logs from Supabase
+      const { data: workoutLogs, error: workoutError } = await supabase
+        .from("workout_logs")
+        .select("*")
+        .eq("user_id", userId)
+
+      if (!workoutError && workoutLogs && workoutLogs.length > 0) {
+        console.log(`HomeScreen: Found ${workoutLogs.length} workout logs in Supabase`)
+
+        // Filter workouts for current month/year
+        const thisMonthWorkouts = workoutLogs.filter((log) => {
+          if (!log.date) return false
+          const logDate = new Date(log.date)
+          return logDate.getMonth() + 1 === currentMonth && logDate.getFullYear() === currentYear
+        })
+
+        workoutCount = thisMonthWorkouts.length
+
+        // Calculate total minutes
+        thisMonthWorkouts.forEach((log) => {
+          if (log.duration) {
+            // Parse duration in format "MM:SS" or "HH:MM:SS"
+            const parts = log.duration.split(":").map(Number)
+            if (parts.length === 2) {
+              // MM:SS format
+              totalMinutes += parts[0]
+            } else if (parts.length === 3) {
+              // HH:MM:SS format
+              totalMinutes += parts[0] * 60 + parts[1]
+            }
+          }
+        })
+      } else {
+        console.log("HomeScreen: No workout logs found in Supabase or error:", workoutError)
+
+        // Fall back to AsyncStorage if Supabase fails
+        try {
+          const workoutLogsJson = await AsyncStorage.getItem("workoutLogs")
+          if (workoutLogsJson) {
+            const localWorkoutLogs = JSON.parse(workoutLogsJson)
+            if (Array.isArray(localWorkoutLogs)) {
+              console.log(`HomeScreen: Found ${localWorkoutLogs.length} workout logs in AsyncStorage`)
+
+              // Filter workouts for current month/year
+              const thisMonthWorkouts = localWorkoutLogs.filter((log) => {
+                if (!log.date) return false
+                const logDate = new Date(log.date)
+                return logDate.getMonth() + 1 === currentMonth && logDate.getFullYear() === currentYear
+              })
+
+              workoutCount = thisMonthWorkouts.length
+
+              // Calculate total minutes
+              thisMonthWorkouts.forEach((log) => {
+                if (log.duration) {
+                  // Parse duration in format "MM:SS" or "HH:MM:SS"
+                  const parts = log.duration.split(":").map(Number)
+                  if (parts.length === 2) {
+                    // MM:SS format
+                    totalMinutes += parts[0]
+                  } else if (parts.length === 3) {
+                    // HH:MM:SS format
+                    totalMinutes += parts[0] * 60 + parts[1]
+                  }
+                }
+              })
+            }
+          }
+        } catch (localError) {
+          console.error("HomeScreen: Error reading local workout logs:", localError)
+        }
+      }
+
+      // Get personal records from Supabase
+      const { data: personalRecords, error: prError } = await supabase
+        .from("personal_records")
+        .select("*")
+        .eq("user_id", userId)
+
+      if (!prError && personalRecords && personalRecords.length > 0) {
+        console.log(`HomeScreen: Found ${personalRecords.length} PRs in Supabase`)
+
+        // Calculate PRs this month
+        prsThisMonth = personalRecords.filter((pr) => {
+          if (!pr.date) return false
+          const prDate = new Date(pr.date)
+          return prDate.getMonth() + 1 === currentMonth && prDate.getFullYear() === currentYear
+        }).length
+      } else {
+        console.log("HomeScreen: No PRs found in Supabase or error:", prError)
+
+        // Fall back to AsyncStorage if Supabase fails
+        try {
+          const personalRecordsJson = await AsyncStorage.getItem("personalRecords")
+          if (personalRecordsJson) {
+            const localPRs = JSON.parse(personalRecordsJson)
+            if (Array.isArray(localPRs)) {
+              console.log(`HomeScreen: Found ${localPRs.length} PRs in AsyncStorage`)
+
+              // Calculate PRs this month
+              prsThisMonth = localPRs.filter((pr) => {
+                if (!pr.date) return false
+                const prDate = new Date(pr.date)
+                return prDate.getMonth() + 1 === currentMonth && prDate.getFullYear() === currentYear
+              }).length
+            }
+          }
+        } catch (localError) {
+          console.error("HomeScreen: Error reading local PRs:", localError)
+        }
+      }
+
+      // Get mental sessions from Supabase
+      const { data: mentalSessions, error: mentalError } = await supabase
+        .from("mental_sessions")
+        .select("*")
+        .eq("user_id", userId)
+
+      if (!mentalError && mentalSessions && mentalSessions.length > 0) {
+        console.log(`HomeScreen: Found ${mentalSessions.length} mental sessions in Supabase`)
+
+        // Calculate mental sessions this month
+        mentalSessionsCount = mentalSessions.filter((session) => {
+          if (!session.date) return false
+          const sessionDate = new Date(session.date)
+          return sessionDate.getMonth() + 1 === currentMonth && sessionDate.getFullYear() === currentYear
+        }).length
+      } else {
+        console.log("HomeScreen: No mental sessions found in Supabase or error:", mentalError)
+
+        // Fall back to AsyncStorage if Supabase fails
+        try {
+          const sessionHistoryJson = await AsyncStorage.getItem("sessionHistory")
+          if (sessionHistoryJson) {
+            const localSessions = JSON.parse(sessionHistoryJson)
+            if (Array.isArray(localSessions)) {
+              console.log(`HomeScreen: Found ${localSessions.length} mental sessions in AsyncStorage`)
+
+              // Calculate mental sessions this month
+              mentalSessionsCount = localSessions.filter((session) => {
+                if (!session.date) return false
+                const sessionDate = new Date(session.date)
+                return sessionDate.getMonth() + 1 === currentMonth && sessionDate.getFullYear() === currentYear
+              }).length
+            }
+          }
+        } catch (localError) {
+          console.error("HomeScreen: Error reading local mental sessions:", localError)
+        }
+      }
+    } catch (error) {
+      console.error("HomeScreen: Error calculating stats from raw data:", error)
+    }
+
+    return { workouts: workoutCount, minutes: totalMinutes, prs: prsThisMonth, mentalSessions: mentalSessionsCount }
+  }
+
+  // Function to save user stats to the user_stats table
+  const saveUserStats = async (userId, workouts, minutes, prs, mentalSessions, month, year) => {
+    try {
+      console.log("HomeScreen: Saving user stats to database")
+
+      // Check if a record already exists
+      const { data: existingStats, error: checkError } = await supabase
+        .from("user_stats")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("current_month", month)
+        .eq("current_year", year)
+        .single()
+
+      if (checkError && checkError.code !== "PGRST116") {
+        console.error("HomeScreen: Error checking existing stats:", checkError)
+        return
+      }
+
+      if (existingStats) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from("user_stats")
+          .update({
+            total_workouts: workouts,
+            total_minutes: minutes,
+            prs_this_month: prs,
+            mental_sessions: mentalSessions,
+            last_updated: new Date().toISOString(),
+          })
+          .eq("id", existingStats.id)
+
+        if (updateError) {
+          console.error("HomeScreen: Error updating user stats:", updateError)
+        } else {
+          console.log("HomeScreen: User stats updated successfully")
+        }
+      } else {
+        // Insert new record
+        const { error: insertError } = await supabase.from("user_stats").insert([
+          {
+            user_id: userId,
+            total_workouts: workouts,
+            total_minutes: minutes,
+            prs_this_month: prs,
+            mental_sessions: mentalSessions,
+            current_month: month,
+            current_year: year,
+          },
+        ])
+
+        if (insertError) {
+          console.error("HomeScreen: Error inserting user stats:", insertError)
+        } else {
+          console.log("HomeScreen: User stats inserted successfully")
+        }
+      }
+    } catch (error) {
+      console.error("HomeScreen: Error saving user stats:", error)
+    }
+  }
+
+  // Function to update stats when a new workout is completed
+  const updateStatsAfterWorkout = async (workoutDuration) => {
+    try {
+      if (!user || !user.id) return
+
+      // Get current month and year
+      const currentDate = new Date()
+      const currentMonth = currentDate.getMonth() + 1
+      const currentYear = currentDate.getFullYear()
+
+      // Parse duration to minutes
+      let durationMinutes = 0
+      if (typeof workoutDuration === "string") {
+        const parts = workoutDuration.split(":").map(Number)
+        if (parts.length === 2) {
+          // MM:SS format
+          durationMinutes = parts[0]
+        } else if (parts.length === 3) {
+          // HH:MM:SS format
+          durationMinutes = parts[0] * 60 + parts[1]
+        }
+      }
+
+      // Get current stats
+      const { data: currentStats, error: statsError } = await supabase
+        .from("user_stats")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("current_month", currentMonth)
+        .eq("current_year", currentYear)
+        .single()
+
+      if (statsError && statsError.code !== "PGRST116") {
+        console.error("HomeScreen: Error fetching current stats:", statsError)
+        return
+      }
+
+      if (currentStats) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from("user_stats")
+          .update({
+            total_workouts: currentStats.total_workouts + 1,
+            total_minutes: currentStats.total_minutes + durationMinutes,
+            last_updated: new Date().toISOString(),
+          })
+          .eq("id", currentStats.id)
+
+        if (updateError) {
+          console.error("HomeScreen: Error updating stats after workout:", updateError)
+        } else {
+          console.log("HomeScreen: Stats updated after workout")
+          // Update local state
+          setStats((prev) => ({
+            ...prev,
+            workouts: prev.workouts + 1,
+            minutes: prev.minutes + durationMinutes,
+          }))
+        }
+      } else {
+        // Insert new record
+        const { error: insertError } = await supabase.from("user_stats").insert([
+          {
+            user_id: user.id,
+            total_workouts: 1,
+            total_minutes: durationMinutes,
+            prs_this_month: 0,
+            mental_sessions: 0,
+            current_month: currentMonth,
+            current_year: currentYear,
+          },
+        ])
+
+        if (insertError) {
+          console.error("HomeScreen: Error inserting stats after workout:", insertError)
+        } else {
+          console.log("HomeScreen: New stats record created after workout")
+          // Update local state
+          setStats((prev) => ({
+            ...prev,
+            workouts: 1,
+            minutes: durationMinutes,
+          }))
+        }
+      }
+    } catch (error) {
+      console.error("HomeScreen: Error updating stats after workout:", error)
+    }
+  }
+
+  // Function to update stats when a new PR is achieved
+  const updateStatsAfterPR = async () => {
+    try {
+      if (!user || !user.id) return
+
+      // Get current month and year
+      const currentDate = new Date()
+      const currentMonth = currentDate.getMonth() + 1
+      const currentYear = currentDate.getFullYear()
+
+      // Get current stats
+      const { data: currentStats, error: statsError } = await supabase
+        .from("user_stats")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("current_month", currentMonth)
+        .eq("current_year", currentYear)
+        .single()
+
+      if (statsError && statsError.code !== "PGRST116") {
+        console.error("HomeScreen: Error fetching current stats:", statsError)
+        return
+      }
+
+      if (currentStats) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from("user_stats")
+          .update({
+            prs_this_month: currentStats.prs_this_month + 1,
+            last_updated: new Date().toISOString(),
+          })
+          .eq("id", currentStats.id)
+
+        if (updateError) {
+          console.error("HomeScreen: Error updating stats after PR:", updateError)
+        } else {
+          console.log("HomeScreen: Stats updated after PR")
+          // Update local state
+          setStats((prev) => ({
+            ...prev,
+            prs: prev.prs + 1,
+          }))
+        }
+      } else {
+        // Insert new record
+        const { error: insertError } = await supabase.from("user_stats").insert([
+          {
+            user_id: user.id,
+            total_workouts: 0,
+            total_minutes: 0,
+            prs_this_month: 1,
+            mental_sessions: 0,
+            current_month: currentMonth,
+            current_year: currentYear,
+          },
+        ])
+
+        if (insertError) {
+          console.error("HomeScreen: Error inserting stats after PR:", insertError)
+        } else {
+          console.log("HomeScreen: New stats record created after PR")
+          // Update local state
+          setStats((prev) => ({
+            ...prev,
+            prs: 1,
+          }))
+        }
+      }
+    } catch (error) {
+      console.error("HomeScreen: Error updating stats after PR:", error)
+    }
+  }
+
+  // Function to update stats when a mental session is completed
+  const updateStatsAfterMentalSession = async () => {
+    try {
+      if (!user || !user.id) return
+
+      // Get current month and year
+      const currentDate = new Date()
+      const currentMonth = currentDate.getMonth() + 1
+      const currentYear = currentDate.getFullYear()
+
+      // Get current stats
+      const { data: currentStats, error: statsError } = await supabase
+        .from("user_stats")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("current_month", currentMonth)
+        .eq("current_year", currentYear)
+        .single()
+
+      if (statsError && statsError.code !== "PGRST116") {
+        console.error("HomeScreen: Error fetching current stats:", statsError)
+        return
+      }
+
+      if (currentStats) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from("user_stats")
+          .update({
+            mental_sessions: (currentStats.mental_sessions || 0) + 1,
+            last_updated: new Date().toISOString(),
+          })
+          .eq("id", currentStats.id)
+
+        if (updateError) {
+          console.error("HomeScreen: Error updating stats after mental session:", updateError)
+        } else {
+          console.log("HomeScreen: Stats updated after mental session")
+          // Update local state
+          setStats((prev) => ({
+            ...prev,
+            mentalSessions: (prev.mentalSessions || 0) + 1,
+          }))
+        }
+      } else {
+        // Insert new record
+        const { error: insertError } = await supabase.from("user_stats").insert([
+          {
+            user_id: user.id,
+            total_workouts: 0,
+            total_minutes: 0,
+            prs_this_month: 0,
+            mental_sessions: 1,
+            current_month: currentMonth,
+            current_year: currentYear,
+          },
+        ])
+
+        if (insertError) {
+          console.error("HomeScreen: Error inserting stats after mental session:", insertError)
+        } else {
+          console.log("HomeScreen: New stats record created after mental session")
+          // Update local state
+          setStats((prev) => ({
+            ...prev,
+            mentalSessions: 1,
+          }))
+        }
+      }
+    } catch (error) {
+      console.error("HomeScreen: Error updating stats after mental session:", error)
+    }
+  }
 
   // Recalculate stats when screen is focused
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
-      calculateStats()
+      if (user) {
+        fetchUserStats(user.id)
+      }
     })
     return unsubscribe
-  }, [navigation])
+  }, [navigation, user])
 
   const getGreeting = () => {
     const hour = new Date().getHours()
@@ -133,7 +722,7 @@ const HomeScreen = ({ navigation }) => {
     return "Good Evening"
   }
 
-  // Update the getFirstName function to be more robust
+  // Get first name safely
   const getFirstName = () => {
     if (!userProfile) return ""
     if (typeof userProfile.name !== "string") return ""
@@ -160,6 +749,48 @@ const HomeScreen = ({ navigation }) => {
     }
   }
 
+  // Get mood emoji and color
+  const getMoodEmoji = () => {
+    if (!currentMood) return "😊"
+
+    switch (currentMood.id) {
+      case "great":
+        return "😄"
+      case "good":
+        return "🙂"
+      case "okay":
+        return "😐"
+      case "bad":
+        return "😔"
+      case "awful":
+        return "😢"
+      default:
+        return "😊"
+    }
+  }
+
+  const getMoodColor = () => {
+    if (!currentMood) return "#9C7CF4"
+    return currentMood.color || "#9C7CF4"
+  }
+
+  // Custom logo component for AI Trainer card
+  const renderAITrainerLogo = (size = 50) => {
+    return (
+      <View style={[styles.aiTrainerIconContainer, { width: size, height: size, borderRadius: size / 2 }]}>
+        {logoLoaded ? (
+          <Image
+            source={require("../assets/fitnessLogo.jpg")}
+            style={{ width: size * 0.9, height: size * 0.9, borderRadius: (size * 0.9) / 2, resizeMode: "contain" }}
+            onError={() => setLogoLoaded(false)}
+          />
+        ) : (
+          <LogoFallback size={size * 0.9} />
+        )}
+      </View>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -167,7 +798,15 @@ const HomeScreen = ({ navigation }) => {
         <View style={styles.header}>
           <View style={styles.headerContent}>
             <View style={styles.logoSmallContainer}>
-              <Image source={require("../assets/logo.png")} style={styles.logoSmall} resizeMode="contain" />
+              {logoLoaded ? (
+                <Image
+                  source={require("../assets/fitnessLogo.jpg")}
+                  style={{ width: 40, height: 40, borderRadius: 20, resizeMode: "contain" }}
+                  onError={() => setLogoLoaded(false)}
+                />
+              ) : (
+                <LogoFallback size={40} />
+              )}
             </View>
             <View>
               <Text style={styles.greeting}>{getGreeting()}</Text>
@@ -216,9 +855,7 @@ const HomeScreen = ({ navigation }) => {
             borderColor="rgba(0, 255, 255, 0.3)"
           >
             <View style={styles.aiTrainerHeader}>
-              <View style={styles.aiTrainerIconContainer}>
-                <Image source={require("../assets/logo.png")} style={styles.aiTrainerIcon} resizeMode="contain" />
-              </View>
+              {renderAITrainerLogo(50)}
               <View style={styles.aiTrainerTitleContainer}>
                 <Text style={styles.aiTrainerTitle}>AI Personal Trainer</Text>
                 <Text style={styles.aiTrainerSubtitle}>Your fitness companion</Text>
@@ -229,45 +866,89 @@ const HomeScreen = ({ navigation }) => {
               Get personalized workouts, form feedback, and motivation from your AI trainer.
             </Text>
 
+            {/* AI Trainer Actions */}
             <View style={styles.aiTrainerActions}>
-              <HoverButton
+              <Button
+                variant="primary"
+                size="sm"
+                iconName="chatbubble-ellipses-outline"
                 style={styles.aiTrainerButton}
                 onPress={() => navigation.navigate("TrainerTab")}
-                activeOpacity={0.8}
-                hoverColor="#00b3ff"
-                pressColor="#0077ff"
               >
-                <Ionicons name="chatbubble-ellipses-outline" size={20} color="black" />
-                <Text style={styles.aiTrainerButtonText}>Chat</Text>
-              </HoverButton>
+                Chat
+              </Button>
 
-              <HoverButton
+              <Button
+                variant="primary"
+                size="sm"
+                iconName="barbell-outline"
                 style={styles.aiTrainerButton}
                 onPress={() => navigation.navigate("WorkoutRecommendation")}
-                activeOpacity={0.8}
-                hoverColor="#00b3ff"
-                pressColor="#0077ff"
               >
-                <Ionicons name="barbell-outline" size={20} color="black" />
-                <Text style={styles.aiTrainerButtonText}>Workouts</Text>
-              </HoverButton>
+                Workouts
+              </Button>
 
-              <HoverButton
+              <Button
+                variant="primary"
+                size="sm"
+                iconName="analytics-outline"
                 style={styles.aiTrainerButton}
                 onPress={() => navigation.navigate("FormAnalysisSelection")}
-                activeOpacity={0.8}
-                hoverColor="#00b3ff"
-                pressColor="#0077ff"
               >
-                <Ionicons name="analytics-outline" size={20} color="black" />
-                <Text style={styles.aiTrainerButtonText}>Form Check</Text>
-              </HoverButton>
+                Form Check
+              </Button>
+            </View>
+          </GlassmorphicCard>
+
+          {/* Mood Tracking Card - Now styled like AI Trainer Card */}
+          <GlassmorphicCard
+            style={styles.aiTrainerCard}
+            color={`${getMoodColor()}20`}
+            borderColor={`${getMoodColor()}40`}
+          >
+            <View style={styles.aiTrainerHeader}>
+              <View style={styles.moodIconContainer}>
+                <Text style={styles.moodEmoji}>{getMoodEmoji()}</Text>
+              </View>
+              <View style={styles.aiTrainerTitleContainer}>
+                <Text style={styles.aiTrainerTitle}>Mental Wellness Check</Text>
+                <Text style={styles.aiTrainerSubtitle}>
+                  {currentMood ? `You're feeling ${currentMood.label} today` : "How are you feeling today?"}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.aiTrainerDescription}>
+              Track your daily mood to monitor your mental wellness and identify patterns over time.
+            </Text>
+
+            {/* Mood Actions */}
+            <View style={styles.aiTrainerActions}>
+              <Button
+                variant="primary"
+                size="sm"
+                iconName="happy-outline"
+                style={[styles.aiTrainerButton, { backgroundColor: getMoodColor() }]}
+                onPress={() => navigation.navigate("MentalTab")}
+              >
+                {currentMood ? "Update Mood" : "Log Mood"}
+              </Button>
+
+              <Button
+                variant="primary"
+                size="sm"
+                iconName="analytics-outline"
+                style={[styles.aiTrainerButton, { backgroundColor: getMoodColor() }]}
+                onPress={() => navigation.navigate("MentalTab")}
+              >
+                View History
+              </Button>
             </View>
           </GlassmorphicCard>
 
           {/* Stats Section */}
           <View style={styles.statsContainer}>
-            {stats.isLoading ? (
+            {stats.isLoading && !loadingTimeout ? (
               <View style={styles.statsLoadingContainer}>
                 <ActivityIndicator size="small" color="cyan" />
                 <Text style={styles.statsLoadingText}>Loading stats...</Text>
@@ -292,6 +973,16 @@ const HomeScreen = ({ navigation }) => {
                   <Ionicons name="time" size={24} color="#33A1FF" />
                   <Text style={styles.statValue}>{stats.minutes || 0}</Text>
                   <Text style={styles.statLabel}>Minutes</Text>
+                </GlassmorphicCard>
+
+                <GlassmorphicCard
+                  style={styles.statCard}
+                  color="rgba(156, 124, 244, 0.1)"
+                  borderColor="rgba(156, 124, 244, 0.3)"
+                >
+                  <Ionicons name="leaf" size={24} color="#9C7CF4" />
+                  <Text style={styles.statValue}>{stats.mentalSessions || 0}</Text>
+                  <Text style={styles.statLabel}>Mental Sessions</Text>
                 </GlassmorphicCard>
 
                 <GlassmorphicCard
@@ -331,11 +1022,10 @@ const HomeScreen = ({ navigation }) => {
           </View>
 
           {/* PR Tracking Card */}
-          <HoverButton
+          <TouchableOpacity
             style={styles.prTrackingCard}
             onPress={() => navigation.navigate("PRTab")}
-            activeOpacity={0.8}
-            hoverColor="rgba(255, 215, 0, 0.15)"
+            activeOpacity={0.7}
           >
             <View style={styles.prTrackingContent}>
               <Ionicons name="trophy" size={32} color="#FFD700" />
@@ -345,14 +1035,13 @@ const HomeScreen = ({ navigation }) => {
               </View>
             </View>
             <Ionicons name="chevron-forward" size={24} color="white" />
-          </HoverButton>
+          </TouchableOpacity>
 
           {/* Workout Log Card */}
-          <HoverButton
+          <TouchableOpacity
             style={styles.logWorkoutCard}
-            onPress={() => navigation.navigate("LogTab")}
-            activeOpacity={0.8}
-            hoverColor="rgba(0, 255, 255, 0.15)"
+            onPress={() => navigation.navigate("WorkoutLog")}
+            activeOpacity={0.7}
           >
             <View style={styles.logWorkoutContent}>
               <Ionicons name="list" size={32} color="cyan" />
@@ -362,7 +1051,7 @@ const HomeScreen = ({ navigation }) => {
               </View>
             </View>
             <Ionicons name="chevron-forward" size={24} color="white" />
-          </HoverButton>
+          </TouchableOpacity>
 
           {/* Bottom padding for tab bar */}
           <View style={styles.bottomPadding} />
@@ -401,15 +1090,14 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     overflow: "hidden",
-    backgroundColor: "transparent",
+    backgroundColor: "black",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "rgba(0, 255, 255, 0.5)",
   },
   logoSmall: {
-    width: 36,
-    height: 36,
+    // No additional styling needed as LogoImage component handles the circular shape
   },
   greeting: {
     color: "#aaa",
@@ -458,6 +1146,7 @@ const styles = StyleSheet.create({
     color: "#aaa",
     fontSize: 13,
   },
+  // AI Trainer Card Styles - Now used for both AI Trainer and Mood cards
   aiTrainerCard: {
     marginHorizontal: 20,
     marginBottom: 15,
@@ -471,10 +1160,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   aiTrainerIconContainer: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "transparent",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
@@ -483,8 +1172,24 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0, 255, 255, 0.5)",
   },
   aiTrainerIcon: {
-    width: 42,
-    height: 42,
+    width: 46,
+    height: 46,
+    transform: [{ scale: 0.9 }], // Scale down slightly to ensure full visibility
+  },
+  moodIconContainer: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(156, 124, 244, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(156, 124, 244, 0.5)",
+  },
+  moodEmoji: {
+    fontSize: 28,
   },
   aiTrainerTitleContainer: {
     flex: 1,
@@ -520,18 +1225,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flex: 1,
-    marginHorizontal: 2, // Reduce margin between buttons
+    marginHorizontal: 2,
     minWidth: 80, // Ensure minimum width but smaller than before
-  },
-  aiTrainerButtonText: {
-    color: "black",
-    fontSize: 12, // Slightly smaller font
-    fontWeight: "bold",
-    marginLeft: 4,
-    textAlign: "center", // Ensure text is centered
   },
   statsContainer: {
     flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     paddingHorizontal: 20,
     marginBottom: 15,
@@ -548,12 +1247,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   statCard: {
-    width: "31%",
+    width: "48%",
     padding: 10,
     alignItems: "center",
     justifyContent: "center", // Add this to center content vertically
     borderRadius: 15,
     height: 100, // Set a fixed height for all cards
+    marginBottom: 10,
   },
   statValue: {
     color: "white",
@@ -659,6 +1359,10 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 80,
+  },
+  statIcon: {
+    width: 36,
+    height: 36,
   },
 })
 

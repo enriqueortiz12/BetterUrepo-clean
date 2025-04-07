@@ -4,21 +4,20 @@ import { useState } from "react"
 import {
   View,
   Text,
-  StyleSheet,
   TextInput,
   TouchableOpacity,
+  StyleSheet,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Image,
   SafeAreaView,
   Dimensions,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { useAuth } from "../context/AuthContext"
 import { supabase } from "../lib/supabase"
+import { LogoImage } from "../utils/imageUtils" // Import the updated LogoImage component
 
 // Get screen dimensions for responsive design
 const { width, height } = Dimensions.get("window")
@@ -28,9 +27,8 @@ const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState(null)
-
-  const { signIn, loading } = useAuth()
+  const [error, setError] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleLogin = async () => {
     if (email === "" || password === "") {
@@ -40,47 +38,17 @@ const LoginScreen = ({ navigation }) => {
     }
 
     setIsLoading(true)
-    setError(null)
+    setError("")
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
 
       if (error) {
         setError(error.message)
-        Alert.alert("Login Failed", error.message)
-      } else {
-        // Check if user has completed profile setup
-        const { data: profileData, error: profileError } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("user_id", data.user.id)
-          .single()
-
-        if (profileError && profileError.code !== "PGRST116") {
-          console.error("Error fetching profile:", profileError)
-        }
-
-        // Show success message
-        Alert.alert("Success", "Logged in successfully")
-
-        // If profile is incomplete, navigate to onboarding
-        if (
-          !profileData ||
-          !profileData.full_name ||
-          !profileData.age ||
-          !profileData.weight ||
-          !profileData.fitness_goal ||
-          !profileData.gender ||
-          !profileData.height
-        ) {
-          navigation.replace("Onboarding")
-        } else {
-          // Navigate to home screen on successful login with complete profile
-          navigation.replace("Main")
-        }
+        Alert.alert("Error", error.message)
       }
     } catch (error) {
       setError("An unexpected error occurred")
@@ -91,9 +59,6 @@ const LoginScreen = ({ navigation }) => {
     }
   }
 
-  // Define the logo source directly to ensure it's properly loaded
-  const logoSource = require("../assets/logo.png")
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -102,68 +67,58 @@ const LoginScreen = ({ navigation }) => {
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
         <ScrollView contentContainerStyle={styles.container}>
-          <View style={styles.contentContainer}>
-            <View style={styles.logoContainer}>
-              <View style={styles.logoWrapper}>
-                {/* Use the directly defined source */}
-                <Image source={logoSource} style={styles.logo} resizeMode="contain" />
-              </View>
-              <Text style={styles.appName}>BetterU</Text>
+          <View style={styles.logoContainer}>
+            <LogoImage size={120} style={styles.logo} />
+          </View>
+
+          <View style={styles.formContainer}>
+            <Text style={styles.title}>Welcome Back</Text>
+            <Text style={styles.subtitle}>Sign in to continue</Text>
+
+            <View style={styles.inputContainer}>
+              <Ionicons name="mail-outline" size={22} color="#888" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Email"
+                placeholderTextColor="#888"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
             </View>
 
-            <Text style={styles.subtitle}>Sign in to your account</Text>
-
-            <View style={styles.formContainer}>
-              <View style={styles.inputContainer}>
-                <Ionicons name="mail-outline" size={22} color="#888" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter Email"
-                  placeholderTextColor="#888"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  value={email}
-                  onChangeText={setEmail}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Ionicons name="lock-closed-outline" size={22} color="#888" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter Password"
-                  placeholderTextColor="#888"
-                  secureTextEntry
-                  autoCapitalize="none"
-                  value={password}
-                  onChangeText={setPassword}
-                />
-              </View>
-
-              <TouchableOpacity style={styles.forgotPasswordBtn} onPress={() => navigation.navigate("ForgotPassword")}>
-                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={isLoading || loading}>
-                {isLoading || loading ? (
-                  <ActivityIndicator color="black" size="small" />
-                ) : (
-                  <Text style={styles.buttonText}>Login</Text>
-                )}
+            <View style={styles.inputContainer}>
+              <Ionicons name="lock-closed-outline" size={22} color="#888" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor="#888"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+              />
+              <TouchableOpacity style={styles.passwordToggle} onPress={() => setShowPassword(!showPassword)}>
+                <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={22} color="#888" />
               </TouchableOpacity>
             </View>
 
-            {error && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-            <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
-              <Text style={styles.signupText}>
-                Don't have an account? <Text style={styles.signupLink}>Sign Up</Text>
-              </Text>
+            <TouchableOpacity style={styles.forgotPassword} onPress={() => navigation.navigate("ForgotPassword")}>
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={isLoading}>
+              {isLoading ? <ActivityIndicator color="black" /> : <Text style={styles.buttonText}>Sign In</Text>}
+            </TouchableOpacity>
+
+            <View style={styles.signupContainer}>
+              <Text style={styles.signupText}>Don't have an account?</Text>
+              <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
+                <Text style={styles.signupLink}>Sign Up</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -184,58 +139,35 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 40,
   },
-  contentContainer: {
-    width: "90%",
-    maxWidth: 400,
-  },
   logoContainer: {
+    marginBottom: 40,
     alignItems: "center",
-    marginBottom: 30,
-  },
-  logoWrapper: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: "transparent",
-    justifyContent: "center",
-    alignItems: "center",
-    overflow: "hidden",
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: "rgba(0, 255, 255, 0.5)",
-    shadowColor: "cyan",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 10,
   },
   logo: {
-    width: 140,
-    height: 140,
-  },
-  appName: {
-    color: "#0099ff",
-    fontSize: 32,
-    fontWeight: "bold",
-    letterSpacing: 2,
-    textShadowColor: "rgba(0, 255, 255, 0.7)",
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10,
-  },
-  subtitle: {
-    color: "cyan",
-    fontSize: 14,
-    marginBottom: 30,
-    textAlign: "center",
+    // No additional styling needed as LogoImage component handles the circular shape
   },
   formContainer: {
     backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderRadius: 20,
     padding: 25,
-    width: "100%",
+    width: "90%",
+    maxWidth: 400,
     marginBottom: 20,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "white",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  subtitle: {
+    fontSize: 16,
+    color: "#B3B3B3",
+    marginBottom: 30,
+    textAlign: "center",
   },
   inputContainer: {
     flexDirection: "row",
@@ -255,8 +187,16 @@ const styles = StyleSheet.create({
     color: "white",
     paddingRight: 15,
   },
-  forgotPasswordBtn: {
-    alignSelf: "flex-end",
+  passwordToggle: {
+    padding: 15,
+  },
+  errorText: {
+    color: "#FF6B6B",
+    marginBottom: 15,
+    textAlign: "center",
+  },
+  forgotPassword: {
+    alignItems: "flex-end",
     marginBottom: 20,
   },
   forgotPasswordText: {
@@ -274,27 +214,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
   },
-  signupText: {
-    color: "white",
+  signupContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
     marginTop: 20,
+  },
+  signupText: {
+    color: "#B3B3B3",
     fontSize: 14,
-    textAlign: "center",
+    marginRight: 5,
   },
   signupLink: {
     color: "cyan",
+    fontSize: 14,
     fontWeight: "bold",
-  },
-  errorContainer: {
-    backgroundColor: "rgba(255, 0, 0, 0.1)",
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 15,
-    borderWidth: 1,
-    borderColor: "rgba(255, 0, 0, 0.3)",
-  },
-  errorText: {
-    color: "#ff6666",
-    textAlign: "center",
   },
 })
 

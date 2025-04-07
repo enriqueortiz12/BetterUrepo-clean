@@ -13,8 +13,6 @@ import {
   ActivityIndicator,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
-import { useAuth } from "../context/AuthContext"
-import { useUser } from "../context/UserContext"
 import { supabase } from "../lib/supabase"
 
 const fitnessGoals = [
@@ -26,7 +24,6 @@ const fitnessGoals = [
   { id: "athleticism", title: "Athleticism" },
 ]
 
-// Add training levels array
 const trainingLevels = [
   { id: "beginner", title: "Beginner", description: "New to fitness or returning after a long break" },
   { id: "intermediate", title: "Intermediate", description: "Consistent training for 6+ months" },
@@ -34,159 +31,126 @@ const trainingLevels = [
 ]
 
 const ProfileScreen = ({ navigation }) => {
-  const { signOut, user, profile, isLoading: authLoading, refetchProfile } = useAuth()
-  const { userProfile, updateProfile: updateUserContextProfile } = useUser()
+  // Local state management - no dependencies on context
+  const [user, setUser] = useState(null)
+  const [profileData, setProfileData] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
   const [modalVisible, setModalVisible] = useState(false)
   const [editField, setEditField] = useState("")
   const [inputValue, setInputValue] = useState("")
   const [inputUnit, setInputUnit] = useState("")
   const [showTrainingLevelModal, setShowTrainingLevelModal] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [profileData, setProfileData] = useState(null)
+  const [loadingTimeout, setLoadingTimeout] = useState(false)
 
-  // Fetch profile data when component mounts
+  // Load user and profile data directly
   useEffect(() => {
-    if (user) {
-      fetchProfileData()
-    }
-  }, [user])
+    let isMounted = true
+    let timeoutId
 
-  // Refresh profile data when the screen is focused
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", () => {
-      if (user) {
-        fetchProfileData()
-      }
-    })
+    // Update the loadUserAndProfile function to properly handle RLS
+    const loadUserAndProfile = async () => {
+      try {
+        console.log("ProfileScreen: Loading user and profile data")
 
-    return unsubscribe
-  }, [navigation, user])
+        // Set a timeout to prevent infinite loading
+        timeoutId = setTimeout(() => {
+          if (isMounted) {
+            console.log("ProfileScreen: Loading timeout reached, showing fallback data")
+            setLoadingTimeout(true)
+            setIsLoading(false)
+          }
+        }, 5000) // 5 second timeout
 
-  // Update the fetchProfileData function with better error handling and debugging
-  const fetchProfileData = async () => {
-    try {
-      setIsLoading(true)
+        // Get current user
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
 
-      // Check if user is defined
-      if (!user || !user.id) {
-        console.log("No user found or user ID is missing")
-        setIsLoading(false)
-        return
-      }
+        if (!isMounted) return
 
-      console.log("Fetching profile data for user ID:", user.id)
+        if (user) {
+          setUser(user)
+          console.log("ProfileScreen: User found:", user.id)
 
-      // Refetch profile from AuthContext
-      refetchProfile && refetchProfile()
+          // Try to get profile data - make sure we're using the authenticated client
+          const { data: profileData, error } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("user_id", user.id)
+            .single()
 
-      // Also fetch directly to ensure we have the latest data
-      const { data, error } = await supabase.from("profiles").select("*").eq("user_id", user.id).single()
+          if (!isMounted) return
 
-      if (error) {
-        console.error("Supabase error fetching profile data:", error)
+          if (error) {
+            console.error("ProfileScreen: Error fetching profile:", error)
 
-        // Check for specific error types
-        if (error.code === "PGRST116") {
-          console.log("No profile found for this user, may need to create one")
-          // Handle case where profile doesn't exist yet
-          await createInitialProfile()
-          return
+            // Create fallback profile data
+            const fallbackProfile = {
+              user_id: user.id,
+              full_name: user.email ? user.email.split("@")[0] : "User",
+              email: user.email,
+              training_level: "intermediate",
+            }
+
+            setProfileData(fallbackProfile)
+
+            // Try to create a profile if it doesn't exist
+            if (error.code === "PGRST116") {
+              console.log("ProfileScreen: No profile found, creating one")
+
+              try {
+                const { data: newProfile, error: createError } = await supabase
+                  .from("profiles")
+                  .insert([fallbackProfile])
+                  .select()
+
+                if (!isMounted) return
+
+                if (createError) {
+                  console.error("ProfileScreen: Failed to create profile:", createError)
+                } else if (newProfile && newProfile.length > 0) {
+                  console.log("ProfileScreen: Created new profile:", newProfile[0])
+                  setProfileData(newProfile[0])
+                }
+              } catch (createError) {
+                console.error("ProfileScreen: Error creating profile:", createError)
+              }
+            }
+          } else {
+            console.log("ProfileScreen: Profile loaded successfully:", profileData)
+            setProfileData(profileData)
+          }
+        } else {
+          console.log("ProfileScreen: No user found")
+          // Handle no user case - should not happen if auth is working
+          navigation.navigate("Login")
         }
-
-        Alert.alert("Error", "Failed to load profile data: " + error.message)
-      } else {
-        console.log("Profile data loaded successfully:", data)
-        setProfileData(data)
-
-        // Also update the user context profile if needed
-        if (data) {
-          updateUserContextProfile({
-            name: data.full_name,
-            email: data.email,
-            age: data.age,
-            weight: data.weight,
-            height: data.height,
-            goal: data.fitness_goal,
-            trainingLevel: data.training_level || "intermediate",
+      } catch (error) {
+        console.error("ProfileScreen: Error loading user/profile:", error)
+        // Use fallback data on error
+        if (isMounted) {
+          setProfileData({
+            full_name: "User",
+            email: "user@example.com",
+            training_level: "intermediate",
           })
         }
+      } finally {
+        // Clear timeout and set loading to false
+        if (timeoutId) clearTimeout(timeoutId)
+        if (isMounted) {
+          setIsLoading(false)
+        }
       }
-    } catch (error) {
-      console.error("Detailed error in fetchProfileData:", error)
-      console.error("Error stack:", error.stack)
-      Alert.alert(
-        "Error",
-        "An unexpected error occurred while loading profile data. Please check your internet connection and try again.",
-      )
-    } finally {
-      setIsLoading(false)
     }
-  }
 
-  // Add a function to create an initial profile if one doesn't exist
-  const createInitialProfile = async () => {
-    try {
-      if (!user || !user.id) return
+    loadUserAndProfile()
 
-      console.log("Creating initial profile for user:", user.id)
-
-      const initialProfile = {
-        user_id: user.id,
-        full_name: user.email ? user.email.split("@")[0] : "New User",
-        email: user.email,
-        training_level: "intermediate",
-      }
-
-      const { data, error } = await supabase.from("profiles").insert([initialProfile]).select()
-
-      if (error) {
-        console.error("Error creating initial profile:", error)
-        Alert.alert("Error", "Failed to create profile: " + error.message)
-      } else {
-        console.log("Initial profile created:", data)
-        setProfileData(data[0])
-
-        // Update user context
-        updateUserContextProfile({
-          name: initialProfile.full_name,
-          email: initialProfile.email,
-          trainingLevel: initialProfile.training_level,
-        })
-      }
-    } catch (error) {
-      console.error("Error in createInitialProfile:", error)
+    return () => {
+      isMounted = false
+      if (timeoutId) clearTimeout(timeoutId)
     }
-  }
-
-  // Add a function to handle training level selection
-  const handleTrainingLevelSelect = async (level) => {
-    try {
-      setIsLoading(true)
-
-      // Update in Supabase
-      const { error } = await supabase.from("profiles").update({ training_level: level }).eq("user_id", user.id)
-
-      if (error) {
-        console.error("Error updating training level:", error)
-        Alert.alert("Error", "Failed to update training level. Please try again.")
-        return
-      }
-
-      // Update local state
-      setProfileData((prev) => (prev ? { ...prev, training_level: level } : prev))
-
-      // Update user context
-      updateUserContextProfile({ trainingLevel: level })
-
-      // Close modal
-      setShowTrainingLevelModal(false)
-    } catch (error) {
-      console.error("Error in handleTrainingLevelSelect:", error)
-      Alert.alert("Error", "An unexpected error occurred.")
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  }, [navigation])
 
   const handleEditField = (field, value, unit = "") => {
     setEditField(field)
@@ -205,50 +169,75 @@ const ProfileScreen = ({ navigation }) => {
       setIsLoading(true)
 
       let updateData = {}
-      let userContextUpdate = {}
 
       switch (editField) {
         case "name":
           updateData = { full_name: inputValue }
-          userContextUpdate = { name: inputValue }
           break
         case "age":
           updateData = { age: Number.parseInt(inputValue) }
-          userContextUpdate = { age: Number.parseInt(inputValue) }
           break
         case "weight":
           updateData = { weight: Number.parseFloat(inputValue) }
-          userContextUpdate = { weight: Number.parseFloat(inputValue) }
           break
         case "height":
           updateData = { height: Number.parseFloat(inputValue) }
-          userContextUpdate = { height: Number.parseFloat(inputValue) }
           break
         case "goal":
           updateData = { fitness_goal: inputValue }
-          userContextUpdate = { goal: inputValue }
           break
       }
 
-      // Update in Supabase
-      const { error } = await supabase.from("profiles").update(updateData).eq("user_id", user.id)
+      if (user) {
+        // Update in Supabase
+        const { error } = await supabase.from("profiles").update(updateData).eq("user_id", user.id)
 
-      if (error) {
-        console.error("Error updating profile:", error)
-        Alert.alert("Error", "Failed to update profile. Please try again.")
-        return
+        if (error) {
+          console.error("Error updating profile:", error)
+          Alert.alert("Error", "Failed to update profile. Please try again.")
+        } else {
+          // Update local state
+          setProfileData((prev) => (prev ? { ...prev, ...updateData } : prev))
+        }
+      } else {
+        // Just update local state if no user
+        setProfileData((prev) => (prev ? { ...prev, ...updateData } : prev))
       }
-
-      // Update local state
-      setProfileData((prev) => (prev ? { ...prev, ...updateData } : prev))
-
-      // Update user context
-      updateUserContextProfile(userContextUpdate)
 
       // Close modal
       setModalVisible(false)
     } catch (error) {
       console.error("Error in handleSave:", error)
+      Alert.alert("Error", "An unexpected error occurred.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleTrainingLevelSelect = async (level) => {
+    try {
+      setIsLoading(true)
+
+      if (user) {
+        // Update in Supabase
+        const { error } = await supabase.from("profiles").update({ training_level: level }).eq("user_id", user.id)
+
+        if (error) {
+          console.error("Error updating training level:", error)
+          Alert.alert("Error", "Failed to update training level. Please try again.")
+        } else {
+          // Update local state
+          setProfileData((prev) => (prev ? { ...prev, training_level: level } : prev))
+        }
+      } else {
+        // Just update local state if no user
+        setProfileData((prev) => (prev ? { ...prev, training_level: level } : prev))
+      }
+
+      // Close modal
+      setShowTrainingLevelModal(false)
+    } catch (error) {
+      console.error("Error in handleTrainingLevelSelect:", error)
       Alert.alert("Error", "An unexpected error occurred.")
     } finally {
       setIsLoading(false)
@@ -262,19 +251,39 @@ const ProfileScreen = ({ navigation }) => {
     return goal ? goal.title : "Not set"
   }
 
-  // Get the title of the selected training level
   const getTrainingLevelTitle = () => {
     const level = trainingLevels.find((level) => level.id === (profileData?.training_level || "intermediate"))
     return level ? level.title : "Not set"
   }
 
-  if (authLoading || isLoading) {
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut()
+      navigation.navigate("Login")
+    } catch (error) {
+      console.error("Error signing out:", error)
+      Alert.alert("Error", "Failed to sign out. Please try again.")
+    }
+  }
+
+  // Show loading state for a maximum of 2 seconds
+  if (isLoading && !loadingTimeout) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color="cyan" />
         <Text style={styles.loadingText}>Loading profile...</Text>
       </View>
     )
+  }
+
+  // If we have a timeout or error, but no profile data, create a fallback profile
+  if (!profileData) {
+    console.log("ProfileScreen: Using fallback profile data")
+    setProfileData({
+      full_name: user?.email ? user.email.split("@")[0] : "User",
+      email: user?.email || "user@example.com",
+      training_level: "intermediate",
+    })
   }
 
   return (
@@ -355,7 +364,7 @@ const ProfileScreen = ({ navigation }) => {
         </View>
 
         <View style={styles.actionsSection}>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={() => navigation.navigate("Settings")}>
             <Ionicons name="settings-outline" size={24} color="white" />
             <Text style={styles.actionButtonText}>Settings</Text>
           </TouchableOpacity>
@@ -365,14 +374,14 @@ const ProfileScreen = ({ navigation }) => {
             <Text style={styles.actionButtonText}>Help & Support</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton} onPress={signOut}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleSignOut}>
             <Ionicons name="log-out-outline" size={24} color="white" />
             <Text style={styles.actionButtonText}>Log Out</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
 
-      {/* PR Edit Modal */}
+      {/* Edit Modal */}
       <Modal
         animationType="slide"
         transparent={true}

@@ -21,20 +21,21 @@ import ModelErrorMessage from "../components/ModelErrorMessage"
 import * as ImagePicker from "expo-image-picker"
 import * as FileSystem from "expo-file-system"
 import FormAnalysisService from "../services/FormAnalysisService"
+import Button from "../components/Button"
 
 // Get screen dimensions for responsive design
 const { width, height } = Dimensions.get("window")
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 
 const WorkoutAnalysisScreen = ({ navigation, route }) => {
-  const { exercise = "squat" } = route.params || {}
+  const { exercise = "squat", videoUri: initialVideoUri } = route.params || {}
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [feedback, setFeedback] = useState(null)
-  const [videoUri, setVideoUri] = useState(null)
+  const [videoUri, setVideoUri] = useState(initialVideoUri || null)
   const [hasPermission, setHasPermission] = useState(null)
   const [showCamera, setShowCamera] = useState(false)
-  const [showVideoPreview, setShowVideoPreview] = useState(false)
+  const [showVideoPreview, setShowVideoPreview] = useState(!!initialVideoUri)
   const [aiModelReady, setAiModelReady] = useState(false)
   const [modelLoadingError, setModelLoadingError] = useState(null)
   const [modelErrorCode, setModelErrorCode] = useState(null)
@@ -552,22 +553,40 @@ const WorkoutAnalysisScreen = ({ navigation, route }) => {
                 ) : (
                   <View style={styles.videoButtonsContainer}>
                     {videoUri && showVideoPreview ? (
-                      <TouchableOpacity style={styles.analyzeButton} onPress={analyzeWorkout} disabled={isUploading}>
-                        <Ionicons name="analytics" size={20} color="black" />
-                        <Text style={styles.analyzeButtonText}>Analyze My Form</Text>
-                      </TouchableOpacity>
+                      <Button
+                        variant="primary"
+                        size="md"
+                        iconName="analytics"
+                        style={styles.analyzeButton}
+                        onPress={analyzeWorkout}
+                        isDisabled={isUploading}
+                      >
+                        Analyze My Form
+                      </Button>
                     ) : (
-                      <>
-                        <TouchableOpacity style={styles.videoButton} onPress={recordVideo} disabled={isUploading}>
-                          <Ionicons name="videocam" size={20} color="black" />
-                          <Text style={styles.videoButtonText}>Record Video</Text>
-                        </TouchableOpacity>
+                      <View style={styles.videoButtonsContainer}>
+                        <Button
+                          variant="primary"
+                          size="md"
+                          iconName="videocam"
+                          style={styles.videoButton}
+                          onPress={recordVideo}
+                          isDisabled={isUploading}
+                        >
+                          Record
+                        </Button>
 
-                        <TouchableOpacity style={styles.videoButton} onPress={pickVideo} disabled={isUploading}>
-                          <Ionicons name="cloud-upload" size={20} color="black" />
-                          <Text style={styles.videoButtonText}>Upload Video</Text>
-                        </TouchableOpacity>
-                      </>
+                        <Button
+                          variant="primary"
+                          size="md"
+                          iconName="cloud-upload"
+                          style={styles.videoButton}
+                          onPress={pickVideo}
+                          isDisabled={isUploading}
+                        >
+                          Upload
+                        </Button>
+                      </View>
                     )}
                   </View>
                 )}
@@ -613,13 +632,13 @@ const WorkoutAnalysisScreen = ({ navigation, route }) => {
               </GlassmorphicCard>
 
               <View style={styles.actionsContainer}>
-                <TouchableOpacity style={styles.resetButton} onPress={resetAnalysis}>
-                  <Text style={styles.resetButtonText}>New Analysis</Text>
-                </TouchableOpacity>
+                <Button variant="secondary" size="md" style={styles.resetButton} onPress={resetAnalysis}>
+                  New Analysis
+                </Button>
 
-                <TouchableOpacity style={styles.trainerButton} onPress={talkToTrainer}>
-                  <Text style={styles.trainerButtonText}>Talk to AI Trainer</Text>
-                </TouchableOpacity>
+                <Button variant="primary" size="md" style={styles.trainerButton} onPress={talkToTrainer}>
+                  Talk to AI Trainer
+                </Button>
               </View>
             </View>
           )}

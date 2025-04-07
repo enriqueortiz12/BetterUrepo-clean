@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useUser } from "../context/UserContext"
@@ -11,118 +11,121 @@ const WorkoutRecommendationScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true)
   const [recommendations, setRecommendations] = useState([])
 
-  // Mock workout recommendations based on user goals
-  const mockRecommendations = {
-    strength: [
-      {
-        id: "1",
-        title: "5x5 Strength Program",
-        description: "Build raw strength with compound movements",
-        duration: "45-60 min",
-        frequency: "3-4x per week",
-        exercises: [
-          { name: "Barbell Squat", sets: 5, reps: 5 },
-          { name: "Bench Press", sets: 5, reps: 5 },
-          { name: "Barbell Row", sets: 5, reps: 5 },
-          { name: "Overhead Press", sets: 5, reps: 5 },
-          { name: "Deadlift", sets: 1, reps: 5 },
-        ],
-      },
-      {
-        id: "2",
-        title: "Powerlifting Focus",
-        description: "Maximize your strength in the big three lifts",
-        duration: "60-75 min",
-        frequency: "4x per week",
-        exercises: [
-          { name: "Squat", sets: 4, reps: "3-5" },
-          { name: "Bench Press", sets: 4, reps: "3-5" },
-          { name: "Deadlift", sets: 3, reps: "3-5" },
-          { name: "Accessory Work", sets: 3, reps: "8-12" },
-        ],
-      },
-    ],
-    muscle: [
-      {
-        id: "1",
-        title: "Hypertrophy Split",
-        description: "Maximize muscle growth with targeted volume",
-        duration: "45-60 min",
-        frequency: "5-6x per week",
-        exercises: [
-          { name: "Push Day (Chest/Shoulders/Triceps)", sets: "12-16 total", reps: "8-12" },
-          { name: "Pull Day (Back/Biceps)", sets: "12-16 total", reps: "8-12" },
-          { name: "Leg Day", sets: "12-16 total", reps: "8-12" },
-        ],
-      },
-      {
-        id: "2",
-        title: "German Volume Training",
-        description: "High volume approach for muscle growth",
-        duration: "60 min",
-        frequency: "4x per week",
-        exercises: [
-          { name: "Main Compound Exercise", sets: 10, reps: 10 },
-          { name: "Secondary Compound Exercise", sets: 10, reps: 10 },
-          { name: "Accessory Exercises", sets: 3, reps: "10-15" },
-        ],
-      },
-    ],
-    health: [
-      {
-        id: "1",
-        title: "Balanced Fitness Plan",
-        description: "Improve overall health and fitness",
-        duration: "30-45 min",
-        frequency: "3-4x per week",
-        exercises: [
-          { name: "Full Body Strength Training", sets: 3, reps: "10-12", frequency: "2x per week" },
-          { name: "Cardio (moderate intensity)", duration: "30 min", frequency: "2x per week" },
-          { name: "Flexibility/Mobility Work", duration: "15-20 min", frequency: "Daily" },
-        ],
-      },
-      {
-        id: "2",
-        title: "Functional Fitness",
-        description: "Improve everyday movement patterns",
-        duration: "45 min",
-        frequency: "3x per week",
-        exercises: [
-          { name: "Compound Movements", sets: 3, reps: "8-12" },
-          { name: "Core Stability Work", sets: 3, reps: "10-15" },
-          { name: "Balance & Coordination", sets: 2, reps: "10-12" },
-        ],
-      },
-    ],
-    athleticism: [
-      {
-        id: "1",
-        title: "Athletic Performance",
-        description: "Enhance speed, power, and agility",
-        duration: "60 min",
-        frequency: "4-5x per week",
-        exercises: [
-          { name: "Plyometric Training", sets: 3, reps: "5-8" },
-          { name: "Strength Training", sets: 4, reps: "4-6" },
-          { name: "Speed & Agility Drills", sets: 3, reps: "20-30 sec" },
-          { name: "Sport-Specific Training", duration: "20 min" },
-        ],
-      },
-      {
-        id: "2",
-        title: "Explosive Power",
-        description: "Build power and athletic ability",
-        duration: "45-60 min",
-        frequency: "3-4x per week",
-        exercises: [
-          { name: "Olympic Lift Variations", sets: 5, reps: "3-5" },
-          { name: "Medicine Ball Throws", sets: 4, reps: "6-8" },
-          { name: "Jump Training", sets: 4, reps: "5-8" },
-          { name: "Sprint Work", sets: 6, reps: "20-40m" },
-        ],
-      },
-    ],
-  }
+  // Use useMemo to prevent recreation on every render
+  const mockRecommendations = useMemo(
+    () => ({
+      strength: [
+        {
+          id: "1",
+          title: "5x5 Strength Program",
+          description: "Build raw strength with compound movements",
+          duration: "45-60 min",
+          frequency: "3-4x per week",
+          exercises: [
+            { name: "Barbell Squat", sets: 5, reps: 5 },
+            { name: "Bench Press", sets: 5, reps: 5 },
+            { name: "Barbell Row", sets: 5, reps: 5 },
+            { name: "Overhead Press", sets: 5, reps: 5 },
+            { name: "Deadlift", sets: 1, reps: 5 },
+          ],
+        },
+        {
+          id: "2",
+          title: "Powerlifting Focus",
+          description: "Maximize your strength in the big three lifts",
+          duration: "60-75 min",
+          frequency: "4x per week",
+          exercises: [
+            { name: "Squat", sets: 4, reps: "3-5" },
+            { name: "Bench Press", sets: 4, reps: "3-5" },
+            { name: "Deadlift", sets: 3, reps: "3-5" },
+            { name: "Accessory Work", sets: 3, reps: "8-12" },
+          ],
+        },
+      ],
+      muscle: [
+        {
+          id: "1",
+          title: "Hypertrophy Split",
+          description: "Maximize muscle growth with targeted volume",
+          duration: "45-60 min",
+          frequency: "5-6x per week",
+          exercises: [
+            { name: "Push Day (Chest/Shoulders/Triceps)", sets: "12-16 total", reps: "8-12" },
+            { name: "Pull Day (Back/Biceps)", sets: "12-16 total", reps: "8-12" },
+            { name: "Leg Day", sets: "12-16 total", reps: "8-12" },
+          ],
+        },
+        {
+          id: "2",
+          title: "German Volume Training",
+          description: "High volume approach for muscle growth",
+          duration: "60 min",
+          frequency: "4x per week",
+          exercises: [
+            { name: "Main Compound Exercise", sets: 10, reps: 10 },
+            { name: "Secondary Compound Exercise", sets: 10, reps: 10 },
+            { name: "Accessory Exercises", sets: 3, reps: "10-15" },
+          ],
+        },
+      ],
+      health: [
+        {
+          id: "1",
+          title: "Balanced Fitness Plan",
+          description: "Improve overall health and fitness",
+          duration: "30-45 min",
+          frequency: "3-4x per week",
+          exercises: [
+            { name: "Full Body Strength Training", sets: 3, reps: "10-12", frequency: "2x per week" },
+            { name: "Cardio (moderate intensity)", duration: "30 min", frequency: "2x per week" },
+            { name: "Flexibility/Mobility Work", duration: "15-20 min", frequency: "Daily" },
+          ],
+        },
+        {
+          id: "2",
+          title: "Functional Fitness",
+          description: "Improve everyday movement patterns",
+          duration: "45 min",
+          frequency: "3x per week",
+          exercises: [
+            { name: "Compound Movements", sets: 3, reps: "8-12" },
+            { name: "Core Stability Work", sets: 3, reps: "10-15" },
+            { name: "Balance & Coordination", sets: 2, reps: "10-12" },
+          ],
+        },
+      ],
+      athleticism: [
+        {
+          id: "1",
+          title: "Athletic Performance",
+          description: "Enhance speed, power, and agility",
+          duration: "60 min",
+          frequency: "4-5x per week",
+          exercises: [
+            { name: "Plyometric Training", sets: 3, reps: "5-8" },
+            { name: "Strength Training", sets: 4, reps: "4-6" },
+            { name: "Speed & Agility Drills", sets: 3, reps: "20-30 sec" },
+            { name: "Sport-Specific Training", duration: "20 min" },
+          ],
+        },
+        {
+          id: "2",
+          title: "Explosive Power",
+          description: "Build power and athletic ability",
+          duration: "45-60 min",
+          frequency: "3-4x per week",
+          exercises: [
+            { name: "Olympic Lift Variations", sets: 5, reps: "3-5" },
+            { name: "Medicine Ball Throws", sets: 4, reps: "6-8" },
+            { name: "Jump Training", sets: 4, reps: "5-8" },
+            { name: "Sprint Work", sets: 6, reps: "20-40m" },
+          ],
+        },
+      ],
+    }),
+    [],
+  ) // Empty dependency array means it's created only once
 
   useEffect(() => {
     // Simulate loading time

@@ -44,7 +44,7 @@ const OnboardingScreen = ({ navigation }) => {
 
     // Alert to confirm we're on the onboarding screen
     Alert.alert("Welcome to Onboarding", "Let's set up your profile to get started!", [{ text: "OK" }])
-  }, [])
+  }, [user?.id]) // Add user?.id to the dependency array
 
   const totalSteps = 5
 

@@ -7,6 +7,8 @@ import RestTimer from "../components/RestTimer"
 import GlassmorphicCard from "../components/GlassmorphicCard"
 import HoverButton from "../components/HoverButton"
 import AsyncStorage from "@react-native-async-storage/async-storage"
+import { supabase } from "../lib/supabase"
+import Button from "../components/Button"
 
 const ActiveWorkoutScreen = ({ navigation, route }) => {
   const { workout, trainingStyle } = route.params || {}
@@ -19,6 +21,7 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
   const [workoutEndTime, setWorkoutEndTime] = useState(null)
   const [elapsedTime, setElapsedTime] = useState(0)
   const [showHowTo, setShowHowTo] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
   const timerRef = useRef(null)
 
@@ -137,6 +140,8 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
 
   const handleFinishWorkout = async () => {
     try {
+      setIsSaving(true)
+
       // Create workout log entry with more detailed information
       const workoutLog = {
         id: Date.now().toString(),
@@ -186,7 +191,99 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
 
       // Save to storage
       await AsyncStorage.setItem("workoutLogs", JSON.stringify(updatedLogs))
-      console.log("Workout log saved successfully. Total logs:", updatedLogs.length)
+      console.log("Workout log saved successfully to local storage. Total logs:", updatedLogs.length)
+
+      // Try to save to Supabase if user is logged in
+      try {
+        // Get the current user
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (user) {
+          console.log("User is logged in, saving workout log to Supabase")
+
+          // Format workout log for Supabase
+          const supabaseLog = {
+            user_id: user.id,
+            date: workoutLog.date,
+            training_style: workoutLog.trainingStyle,
+            duration: workoutLog.duration,
+            exercise_count: workoutLog.exercises,
+            set_count: workoutLog.sets,
+            completed_sets: workoutLog.completedSets,
+            total_weight: workoutLog.totalWeight,
+            exercise_names: workoutLog.exerciseNames,
+            notes: "",
+          }
+
+          // Insert into Supabase
+          const { error } = await supabase.from("workout_logs").insert([supabaseLog])
+
+          if (error) {
+            console.error("Error saving workout log to Supabase:", error)
+            // Continue with local storage only
+          } else {
+            console.log("Workout log saved successfully to Supabase")
+          }
+
+          // Get current month and year for stats update
+          const currentDate = new Date()
+          const currentMonth = currentDate.getMonth() + 1
+          const currentYear = currentDate.getFullYear()
+
+          // Calculate duration in minutes
+          let durationMinutes = 0
+          if (typeof formatTime(elapsedTime) === "string") {
+            const parts = formatTime(elapsedTime).split(":").map(Number)
+            if (parts.length === 2) {
+              // MM:SS format
+              durationMinutes = parts[0]
+            } else if (parts.length === 3) {
+              // HH:MM:SS format
+              durationMinutes = parts[0] * 60 + parts[1]
+            }
+          }
+
+          // Get current stats
+          const { data: currentStats, error: statsError } = await supabase
+            .from("user_stats")
+            .select("*")
+            .eq("user_id", user.id)
+            .eq("current_month", currentMonth)
+            .eq("current_year", currentYear)
+            .single()
+
+          if (statsError && statsError.code !== "PGRST116") {
+            console.error("Error fetching current stats:", statsError)
+          } else if (currentStats) {
+            // Update existing record
+            await supabase
+              .from("user_stats")
+              .update({
+                total_workouts: currentStats.total_workouts + 1,
+                total_minutes: currentStats.total_minutes + durationMinutes,
+                last_updated: new Date().toISOString(),
+              })
+              .eq("id", currentStats.id)
+          } else {
+            // Insert new record
+            await supabase.from("user_stats").insert([
+              {
+                user_id: user.id,
+                total_workouts: 1,
+                total_minutes: durationMinutes,
+                prs_this_month: 0,
+                current_month: currentMonth,
+                current_year: currentYear,
+              },
+            ])
+          }
+        }
+      } catch (supabaseError) {
+        console.error("Error saving to Supabase:", supabaseError)
+        // Continue with local storage only
+      }
 
       // Navigate back
       Alert.alert("Workout Complete", "Great job! Your workout has been saved to your log.", [
@@ -196,6 +293,8 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
     } catch (error) {
       console.error("Error saving workout log:", error)
       Alert.alert("Error", "Failed to save workout log. Please try again.")
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -244,15 +343,18 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
             <Text style={styles.summaryValue}>{trainingStyle?.title || "Custom"}</Text>
           </GlassmorphicCard>
 
-          <HoverButton
+          <Button
+            variant="primary"
+            size="lg"
+            iconName="checkmark"
+            iconPosition="right"
             style={styles.finishButton}
             onPress={handleFinishWorkout}
-            activeOpacity={0.8}
-            hoverColor="#00b3ff"
-            pressColor="#0077ff"
+            isLoading={isSaving}
+            disabled={isSaving}
           >
-            <Text style={styles.finishButtonText}>Save Workout</Text>
-          </HoverButton>
+            Save Workout
+          </Button>
         </View>
       ) : (
         <>
@@ -368,15 +470,13 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
                   </View>
 
                   {index === currentSetIndex && !set.completed ? (
-                    <HoverButton
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      iconName="checkmark"
                       style={styles.completeButton}
                       onPress={handleSetComplete}
-                      activeOpacity={0.8}
-                      hoverColor="#00b3ff"
-                      pressColor="#0077ff"
-                    >
-                      <Ionicons name="checkmark" size={24} color="black" />
-                    </HoverButton>
+                    />
                   ) : set.completed ? (
                     <View style={styles.completedIndicator}>
                       <Ionicons name="checkmark" size={20} color="cyan" />
@@ -387,15 +487,17 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
                 </View>
               ))}
 
-              <HoverButton
+              <Button
+                variant="outline"
+                size="md"
+                iconName="add"
+                iconColor="#ff3b5c"
                 style={styles.addSetButton}
+                textStyle={{ color: "#ff3b5c" }}
                 onPress={handleAddSet}
-                activeOpacity={0.7}
-                hoverColor="rgba(255, 59, 92, 0.2)"
               >
-                <Ionicons name="add" size={24} color="#ff3b5c" />
-                <Text style={styles.addSetText}>Add Set</Text>
-              </HoverButton>
+                Add Set
+              </Button>
             </View>
           </ScrollView>
 
@@ -433,15 +535,14 @@ const ActiveWorkoutScreen = ({ navigation, route }) => {
                   <Text style={styles.instructionStep}>5. Return to starting position with control</Text>
                 </ScrollView>
 
-                <HoverButton
+                <Button
+                  variant="primary"
+                  size="md"
                   style={styles.closeModalButtonStyle}
                   onPress={() => setShowHowTo(false)}
-                  activeOpacity={0.8}
-                  hoverColor="#00b3ff"
-                  pressColor="#0077ff"
                 >
-                  <Text style={styles.closeButtonText}>Close</Text>
-                </HoverButton>
+                  Close
+                </Button>
               </View>
             </View>
           </Modal>

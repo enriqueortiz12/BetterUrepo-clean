@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { View, Text, StyleSheet, Dimensions, Animated, Easing } from "react-native"
 import Icon from "react-native-vector-icons/FontAwesome"
+import { LogoImage } from "../utils/imageUtils"
 
 const { width, height } = Dimensions.get("window")
 
@@ -12,15 +13,16 @@ const LoadingScreen = ({ route, navigation, directNavigation }) => {
 
   const [loadingDots, setLoadingDots] = useState("")
   const [motivationalText, setMotivationalText] = useState("")
-  const logoAnim = useState(new Animated.Value(1))[0]
-  const glowAnim = useState(new Animated.Value(0.3))[0]
+  const [logoLoaded, setLogoLoaded] = useState(false)
+  const [logoError, setLogoError] = useState(false)
+
+  // Create separate animated values for native-driven and JS-driven animations
+  const logoScaleAnim = useState(new Animated.Value(1))[0] // For native-driven scale
+  const logoGlowAnim = useState(new Animated.Value(0.3))[0] // For JS-driven opacity
   const rotateAnim = useState(new Animated.Value(0))[0]
   const fadeAnim = useState(new Animated.Value(0))[0]
   const scaleAnim = useState(new Animated.Value(0.5))[0]
   const progressAnim = useState(new Animated.Value(0))[0]
-
-  // Define the logo source directly
-  const logoSource = require("../assets/fitnessLogo.png")
 
   // Fitness icons data
   const fitnessIcons = [
@@ -41,7 +43,7 @@ const LoadingScreen = ({ route, navigation, directNavigation }) => {
   }))
 
   // Navigate function that works with both direct and route navigation
-  const navigateToNext = () => {
+  const navigateToNext = useCallback(() => {
     if (directNavigation) {
       // Use the direct navigation function if provided
       directNavigation(nextScreen || "Main", nextScreenParams || {})
@@ -59,7 +61,7 @@ const LoadingScreen = ({ route, navigation, directNavigation }) => {
     } else {
       console.warn("No navigation method available")
     }
-  }
+  }, [directNavigation, navigation, nextScreen, nextScreenParams])
 
   useEffect(() => {
     // Define motivationalPhrases inside the effect to avoid dependency issues
@@ -79,39 +81,47 @@ const LoadingScreen = ({ route, navigation, directNavigation }) => {
     const randomPhrase = motivationalPhrases[Math.floor(Math.random() * motivationalPhrases.length)]
     setMotivationalText(randomPhrase)
 
-    // Logo animation - pulse with glow
-    Animated.loop(
+    // NATIVE-DRIVEN ANIMATIONS
+    // Logo scale animation - pulse effect
+    const logoScaleAnimation = Animated.loop(
       Animated.sequence([
-        Animated.parallel([
-          Animated.timing(logoAnim, {
-            toValue: 1.05,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: 1,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: false,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(logoAnim, {
-            toValue: 0.95,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: 0.3,
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: false,
-          }),
-        ]),
+        Animated.timing(logoScaleAnim, {
+          toValue: 1.05,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(logoScaleAnim, {
+          toValue: 0.95,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
       ]),
-    ).start()
+    )
+
+    // JS-DRIVEN ANIMATIONS (separate)
+    // Logo glow animation
+    const logoGlowAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoGlowAnim, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: false, // Must be false for opacity
+        }),
+        Animated.timing(logoGlowAnim, {
+          toValue: 0.3,
+          duration: 1500,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: false, // Must be false for opacity
+        }),
+      ]),
+    )
+
+    // Start both animations separately
+    logoScaleAnimation.start()
+    logoGlowAnimation.start()
 
     // Rotate animation for logo elements
     Animated.loop(
@@ -143,7 +153,7 @@ const LoadingScreen = ({ route, navigation, directNavigation }) => {
       toValue: 1,
       duration: 3000,
       easing: Easing.inOut(Easing.cubic),
-      useNativeDriver: false,
+      useNativeDriver: false, // Must be false for layout properties
     })
     progressAnimation.start()
 
@@ -202,30 +212,42 @@ const LoadingScreen = ({ route, navigation, directNavigation }) => {
       clearTimeout(timer)
       clearInterval(dotsInterval)
     }
-  }, [fadeAnim, glowAnim, iconAnims, logoAnim, progressAnim, rotateAnim, scaleAnim])
+  }, [fadeAnim, logoGlowAnim, logoScaleAnim, iconAnims, progressAnim, rotateAnim, scaleAnim, navigateToNext])
+
+  const handleLogoLoad = () => {
+    console.log("Logo loaded successfully")
+    setLogoLoaded(true)
+  }
+
+  const handleLogoError = () => {
+    console.error("Failed to load logo image")
+    setLogoError(true)
+  }
 
   return (
     <View style={styles.container}>
-      <Animated.Image
-        source={logoSource}
-        style={[
-          styles.logo,
-          {
-            transform: [
-              { scale: scaleAnim },
-              {
-                rotate: rotateAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ["0deg", "360deg"],
-                }),
-              },
-            ],
-            opacity: fadeAnim,
-          },
-        ]}
-      />
-      <Animated.View style={[styles.glow, { opacity: glowAnim }]} />
+      {/* Logo container with separate animated components */}
+      <View style={styles.logoContainer}>
+        <Animated.View
+          style={[
+            styles.glow,
+            {
+              opacity: logoGlowAnim, // JS-driven
+            },
+          ]}
+        />
+        <Animated.View
+          style={{
+            transform: [{ scale: logoScaleAnim }], // Native-driven
+          }}
+        >
+          <LogoImage style={styles.logo} />
+        </Animated.View>
+      </View>
+
+      <Text style={styles.appTitle}>BetterU</Text>
       <Text style={styles.motivationalText}>{motivationalText}</Text>
+
       <View style={styles.progressBarContainer}>
         <Animated.View
           style={[
@@ -239,6 +261,7 @@ const LoadingScreen = ({ route, navigation, directNavigation }) => {
           ]}
         />
       </View>
+
       <Text style={styles.loadingText}>
         Loading
         <Text style={styles.dots}>{loadingDots}</Text>
@@ -281,20 +304,37 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
   },
-  logo: {
+  logoContainer: {
+    position: "relative",
     width: 150,
     height: 150,
-    resizeMode: "contain",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 20,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    resizeMode: "contain",
+    zIndex: 2,
   },
   glow: {
     position: "absolute",
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: "#BB86FC",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "#00FFFF",
     opacity: 0.3,
-    zIndex: -1,
+    zIndex: 1,
+  },
+  appTitle: {
+    fontSize: 36,
+    fontWeight: "bold",
+    color: "#00FFFF",
+    marginBottom: 20,
+    textShadowColor: "rgba(0, 255, 255, 0.7)",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
   },
   motivationalText: {
     fontSize: 18,
@@ -314,7 +354,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: "100%",
-    backgroundColor: "#BB86FC",
+    backgroundColor: "#00FFFF",
     width: "0%",
   },
   loadingText: {

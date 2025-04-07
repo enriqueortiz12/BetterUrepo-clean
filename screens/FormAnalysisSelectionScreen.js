@@ -16,6 +16,7 @@ import GlassmorphicCard from "../components/GlassmorphicCard"
 import * as ImagePicker from "expo-image-picker"
 import * as FileSystem from "expo-file-system"
 import VideoPlayer from "../components/VideoPlayer"
+import Button from "../components/Button"
 
 const FormAnalysisSelectionScreen = ({ navigation }) => {
   const [selectedExercise, setSelectedExercise] = useState(null)
@@ -266,25 +267,40 @@ const FormAnalysisSelectionScreen = ({ navigation }) => {
               </View>
 
               <View style={styles.videoButtonsContainer}>
-                <TouchableOpacity style={styles.videoButton} onPress={recordVideo} disabled={isUploading}>
-                  <Ionicons name="videocam" size={20} color="black" />
-                  <Text style={styles.videoButtonText}>Record</Text>
-                </TouchableOpacity>
+                <Button
+                  variant="primary"
+                  size="md"
+                  iconName="videocam"
+                  style={styles.videoButton}
+                  onPress={recordVideo}
+                  isDisabled={isUploading}
+                >
+                  Record
+                </Button>
 
-                <TouchableOpacity style={styles.videoButton} onPress={pickVideo} disabled={isUploading}>
-                  <Ionicons name="cloud-upload" size={20} color="black" />
-                  <Text style={styles.videoButtonText}>Upload</Text>
-                </TouchableOpacity>
+                <Button
+                  variant="primary"
+                  size="md"
+                  iconName="cloud-upload"
+                  style={styles.videoButton}
+                  onPress={pickVideo}
+                  isDisabled={isUploading}
+                >
+                  Upload
+                </Button>
               </View>
 
-              <TouchableOpacity
-                style={[styles.continueButton, (!videoUri || isUploading) && styles.disabledButton]}
+              <Button
+                variant="primary"
+                size="md"
+                iconName="arrow-forward"
+                iconPosition="right"
+                style={styles.continueButton}
                 onPress={handleContinue}
-                disabled={!videoUri || isUploading}
+                isDisabled={!videoUri || isUploading}
               >
-                <Text style={styles.continueButtonText}>Continue to Analysis</Text>
-                <Ionicons name="arrow-forward" size={20} color="black" />
-              </TouchableOpacity>
+                Continue to Analysis
+              </Button>
             </GlassmorphicCard>
           )}
 

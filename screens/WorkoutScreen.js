@@ -17,6 +17,7 @@ import {
 import { Ionicons } from "@expo/vector-icons"
 import { trainingStyles } from "../data/trainingStylesData"
 import GlassmorphicCard from "../components/GlassmorphicCard"
+import Button from "../components/Button"
 
 const { width, height } = Dimensions.get("window")
 const isIphoneX = Platform && Platform.OS === "ios" && (height >= 812 || width >= 812)
@@ -292,13 +293,14 @@ const WorkoutScreen = ({ navigation, route }) => {
       {/* Fixed workout actions container */}
       <View style={styles.workoutActions}>
         {/* Fixed Start Workout button */}
-        <TouchableOpacity
+        <Button
+          variant="primary"
+          size="md"
           style={styles.startButton}
           onPress={() => navigation.navigate("ActiveWorkout", { workout: item, trainingStyle: item })}
-          activeOpacity={0.8}
         >
-          <Text style={styles.startButtonText}>Start Workout</Text>
-        </TouchableOpacity>
+          Start Workout
+        </Button>
 
         {/* Info button */}
         <TouchableOpacity style={styles.detailsButton} activeOpacity={0.7}>
@@ -312,9 +314,21 @@ const WorkoutScreen = ({ navigation, route }) => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Workouts</Text>
-        <TouchableOpacity style={styles.filterButton} onPress={() => {}} activeOpacity={0.7}>
-          <Ionicons name="options-outline" size={24} color="white" />
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          {/* Add Workout Log button */}
+          <TouchableOpacity
+            style={styles.logButton}
+            onPress={() => navigation.navigate("WorkoutLog")}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="list" size={20} color="white" />
+            <Text style={styles.logButtonText}>Logs</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.filterButton} onPress={() => {}} activeOpacity={0.7}>
+            <Ionicons name="options-outline" size={24} color="white" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* All filters in a single row */}
@@ -483,6 +497,26 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 28,
     fontWeight: "bold",
+  },
+  headerButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  logButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 153, 255, 0.2)",
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: "rgba(0, 153, 255, 0.3)",
+  },
+  logButtonText: {
+    color: "white",
+    fontSize: 14,
+    marginLeft: 5,
   },
   filterButton: {
     flexDirection: "row",

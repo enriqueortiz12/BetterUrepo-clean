@@ -6,6 +6,7 @@ export const initialPRs = [
     value: 185,
     unit: "lbs",
     date: "2023-10-15",
+    target: 225,
   },
   {
     id: "2",
@@ -13,6 +14,7 @@ export const initialPRs = [
     value: 275,
     unit: "lbs",
     date: "2023-10-20",
+    target: 315,
   },
   {
     id: "3",
@@ -20,6 +22,7 @@ export const initialPRs = [
     value: 315,
     unit: "lbs",
     date: "2023-11-01",
+    target: 405,
   },
   {
     id: "4",
@@ -27,6 +30,7 @@ export const initialPRs = [
     value: 25.5,
     unit: "min",
     date: "2023-11-05",
+    target: 22,
   },
 ]
 

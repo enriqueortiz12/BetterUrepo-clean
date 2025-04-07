@@ -1,15 +1,33 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ActivityIndicator } from "react-native"
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  Platform,
+  Dimensions,
+} from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import GlassmorphicCard from "../components/GlassmorphicCard"
+import { supabase } from "../lib/supabase"
+import Button from "../components/Button"
+
+// Get screen dimensions for responsive design
+const { width, height } = Dimensions.get("window")
+const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 
 const WorkoutLogScreen = ({ navigation }) => {
   const [workoutLogs, setWorkoutLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState(null)
+  const [isSyncing, setIsSyncing] = useState(false)
 
   useEffect(() => {
     loadWorkoutLogs()
@@ -20,11 +38,69 @@ const WorkoutLogScreen = ({ navigation }) => {
       setLoading(true)
       console.log("Loading workout logs...")
 
+      // Get current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        console.log("No authenticated user found, loading from local storage only")
+        await loadLogsFromLocalStorage()
+        return
+      }
+
+      // Try to fetch logs from Supabase first
+      const { data: supabaseLogs, error } = await supabase
+        .from("workout_logs")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: false })
+
+      if (error) {
+        console.error("Error fetching workout logs from Supabase:", error)
+        // Fall back to local storage if Supabase fails
+        await loadLogsFromLocalStorage()
+      } else {
+        console.log(`Found ${supabaseLogs.length} workout logs in Supabase`)
+
+        // Transform Supabase logs to match the expected format
+        const formattedLogs = supabaseLogs.map((log) => ({
+          id: log.id,
+          date: log.date,
+          trainingStyle: log.training_style,
+          duration: log.duration,
+          exercises: log.exercise_count,
+          sets: log.set_count,
+          exerciseNames: log.exercise_names || [],
+          completedSets: log.completed_sets,
+          totalWeight: log.total_weight,
+          notes: log.notes,
+        }))
+
+        setWorkoutLogs(formattedLogs)
+
+        // Also update local storage as a backup
+        await AsyncStorage.setItem("workoutLogs", JSON.stringify(formattedLogs))
+      }
+
+      setLoading(false)
+      setRefreshing(false)
+    } catch (error) {
+      console.error("Error loading workout logs:", error)
+      Alert.alert("Error", "Failed to load workout logs")
+      setWorkoutLogs([])
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }
+
+  const loadLogsFromLocalStorage = async () => {
+    try {
       const logs = await AsyncStorage.getItem("workoutLogs")
       if (logs) {
         try {
           const parsedLogs = JSON.parse(logs)
-          console.log(`Found ${parsedLogs.length} workout logs`)
+          console.log(`Found ${parsedLogs.length} workout logs in local storage`)
 
           if (Array.isArray(parsedLogs)) {
             // Sort logs by date (newest first)
@@ -39,18 +115,121 @@ const WorkoutLogScreen = ({ navigation }) => {
           setWorkoutLogs([])
         }
       } else {
-        console.log("No workout logs found")
+        console.log("No workout logs found in local storage")
         setWorkoutLogs([])
       }
 
       setLoading(false)
       setRefreshing(false)
     } catch (error) {
-      console.error("Error loading workout logs:", error)
-      Alert.alert("Error", "Failed to load workout logs")
+      console.error("Error loading logs from local storage:", error)
       setWorkoutLogs([])
       setLoading(false)
       setRefreshing(false)
+    }
+  }
+
+  // Sync local logs to Supabase
+  const syncLogsToSupabase = async () => {
+    try {
+      setIsSyncing(true)
+      setSyncStatus("Syncing logs to cloud...")
+
+      // Get current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        setSyncStatus("Error: Not logged in")
+        setTimeout(() => setSyncStatus(null), 3000)
+        setIsSyncing(false)
+        return
+      }
+
+      // Get local logs
+      const localLogsJson = await AsyncStorage.getItem("workoutLogs")
+      if (!localLogsJson) {
+        setSyncStatus("No local logs to sync")
+        setTimeout(() => setSyncStatus(null), 3000)
+        setIsSyncing(false)
+        return
+      }
+
+      const localLogs = JSON.parse(localLogsJson)
+      if (!Array.isArray(localLogs) || localLogs.length === 0) {
+        setSyncStatus("No local logs to sync")
+        setTimeout(() => setSyncStatus(null), 3000)
+        setIsSyncing(false)
+        return
+      }
+
+      // Get existing Supabase logs to avoid duplicates
+      const { data: existingLogs, error: fetchError } = await supabase
+        .from("workout_logs")
+        .select("id")
+        .eq("user_id", user.id)
+
+      if (fetchError) {
+        console.error("Error fetching existing logs:", fetchError)
+        setSyncStatus("Error: Couldn't fetch existing logs")
+        setTimeout(() => setSyncStatus(null), 3000)
+        setIsSyncing(false)
+        return
+      }
+
+      // Create a set of existing IDs for faster lookup
+      const existingIds = new Set(existingLogs.map((log) => log.id))
+
+      // Filter out logs that already exist in Supabase
+      const logsToSync = localLogs.filter((log) => !existingIds.has(log.id))
+
+      if (logsToSync.length === 0) {
+        setSyncStatus("All logs already synced")
+        setTimeout(() => setSyncStatus(null), 3000)
+        setIsSyncing(false)
+        return
+      }
+
+      setSyncStatus(`Syncing ${logsToSync.length} logs...`)
+
+      // Transform logs to match Supabase schema
+      const formattedLogs = logsToSync.map((log) => ({
+        id: log.id,
+        user_id: user.id,
+        date: log.date,
+        training_style: log.trainingStyle,
+        duration: log.duration,
+        exercise_count: log.exercises,
+        set_count: log.sets,
+        completed_sets: log.completedSets || 0,
+        total_weight: log.totalWeight || 0,
+        exercise_names: log.exerciseNames || [],
+        notes: log.notes || "",
+      }))
+
+      // Insert logs into Supabase
+      const { error: insertError } = await supabase.from("workout_logs").insert(formattedLogs)
+
+      if (insertError) {
+        console.error("Error syncing logs to Supabase:", insertError)
+        setSyncStatus("Error: Failed to sync logs")
+        setTimeout(() => setSyncStatus(null), 3000)
+        setIsSyncing(false)
+        return
+      }
+
+      setSyncStatus(`Successfully synced ${logsToSync.length} logs`)
+      setTimeout(() => setSyncStatus(null), 3000)
+
+      // Reload logs to show the updated data
+      loadWorkoutLogs()
+    } catch (error) {
+      console.error("Error in syncLogsToSupabase:", error)
+      setSyncStatus("Error: Sync failed")
+      setTimeout(() => setSyncStatus(null), 3000)
+    } finally {
+      setIsSyncing(false)
     }
   }
 
@@ -70,9 +249,26 @@ const WorkoutLogScreen = ({ navigation }) => {
 
   const deleteWorkoutLog = async (id) => {
     try {
+      // First update local state
       const updatedLogs = workoutLogs.filter((log) => log.id !== id)
       setWorkoutLogs(updatedLogs)
+
+      // Update local storage
       await AsyncStorage.setItem("workoutLogs", JSON.stringify(updatedLogs))
+
+      // Try to delete from Supabase if user is logged in
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (user) {
+        const { error } = await supabase.from("workout_logs").delete().eq("id", id).eq("user_id", user.id)
+
+        if (error) {
+          console.error("Error deleting workout log from Supabase:", error)
+          // We don't revert the local deletion even if Supabase fails
+        }
+      }
     } catch (error) {
       console.error("Error deleting workout log:", error)
       Alert.alert("Error", "Failed to delete workout log")
@@ -146,10 +342,35 @@ const WorkoutLogScreen = ({ navigation }) => {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Workout Log</Text>
-        <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-          <Ionicons name="refresh-outline" size={24} color="white" />
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <Button
+            variant="outline"
+            size="sm"
+            iconName="sync"
+            style={styles.syncButton}
+            onPress={syncLogsToSupabase}
+            isLoading={isSyncing}
+            disabled={isSyncing}
+          >
+            Sync
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            iconName="refresh"
+            style={styles.refreshButton}
+            onPress={onRefresh}
+            isLoading={refreshing}
+            disabled={refreshing}
+          />
+        </View>
       </View>
+
+      {syncStatus && (
+        <View style={styles.syncStatusContainer}>
+          <Text style={styles.syncStatusText}>{syncStatus}</Text>
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.emptyContainer}>
@@ -194,6 +415,34 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 28,
     fontWeight: "bold",
+  },
+  headerButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  syncButton: {
+    marginRight: 10,
+  },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    padding: 0,
+  },
+  syncStatusContainer: {
+    backgroundColor: "rgba(0, 255, 255, 0.1)",
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    marginHorizontal: 20,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(0, 255, 255, 0.3)",
+  },
+  syncStatusText: {
+    color: "cyan",
+    textAlign: "center",
+    fontSize: 14,
   },
   emptyContainer: {
     flex: 1,
@@ -304,14 +553,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 5,
     marginLeft: 22, // Align with other items
-  },
-  refreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
   },
 })
 

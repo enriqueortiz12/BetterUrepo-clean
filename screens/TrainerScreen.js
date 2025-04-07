@@ -1,12 +1,11 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   View,
   Text,
   StyleSheet,
   TextInput,
-  TouchableOpacity,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -15,30 +14,42 @@ import {
   Animated,
   Dimensions,
   ScrollView,
-  Image,
   Easing,
   SafeAreaView,
+  Alert,
+  TouchableOpacity,
 } from "react-native"
 import { Ionicons } from "@expo/vector-icons"
 import { useTrainer } from "../context/TrainerContext"
 import { useUser } from "../context/UserContext"
+import Button from "../components/Button"
+import { LogoImage } from "../utils/imageUtils"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 
+// Get screen dimensions for responsive design
 const { width, height } = Dimensions.get("window")
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812)
 
 const TrainerScreen = ({ navigation, route }) => {
-  const { conversations, sendMessage, isLoading, apiKeySet } = useTrainer()
+  const { conversations, sendMessage, clearConversations, isLoading, apiKeySet } = useTrainer()
   const { userProfile } = useUser()
   const [message, setMessage] = useState("")
   const [isTyping, setIsTyping] = useState(false)
   const flatListRef = useRef(null)
   const inputRef = useRef(null)
 
+  const [messagesSentToday, setMessagesSentToday] = useState(0)
+  const [lastMessageDate, setLastMessageDate] = useState(null)
+  const [isLimitReached, setIsLimitReached] = useState(false)
+  const MESSAGE_LIMIT = 20
+
   // Use state for animated values instead of refs
   const [fadeAnim] = useState(new Animated.Value(0))
   const [scaleAnim] = useState(new Animated.Value(0.95))
   const [glowAnim] = useState(new Animated.Value(0.3))
   const [typingDots] = useState([new Animated.Value(0.4), new Animated.Value(0.7), new Animated.Value(1)])
+
+  const [syncStatus, setSyncStatus] = useState(null)
 
   // Check if API key is properly set
   useEffect(() => {
@@ -142,8 +153,62 @@ const TrainerScreen = ({ navigation, route }) => {
     }
   }, [conversations])
 
+  // Load and check daily message count
+  useEffect(() => {
+    const loadMessageCount = async () => {
+      try {
+        const storedData = await AsyncStorage.getItem("trainerMessageCount")
+        if (storedData) {
+          const { count, date } = JSON.parse(storedData)
+          const storedDate = new Date(date)
+          const today = new Date()
+
+          // Check if the stored date is from today
+          if (storedDate.toDateString() === today.toDateString()) {
+            setMessagesSentToday(count)
+            setLastMessageDate(date)
+            setIsLimitReached(count >= MESSAGE_LIMIT)
+          } else {
+            // Reset counter for a new day
+            setMessagesSentToday(0)
+            setLastMessageDate(today.toISOString())
+            setIsLimitReached(false)
+            await AsyncStorage.setItem(
+              "trainerMessageCount",
+              JSON.stringify({
+                count: 0,
+                date: today.toISOString(),
+              }),
+            )
+          }
+        } else {
+          // Initialize counter if it doesn't exist
+          const today = new Date()
+          setLastMessageDate(today.toISOString())
+          await AsyncStorage.setItem(
+            "trainerMessageCount",
+            JSON.stringify({
+              count: 0,
+              date: today.toISOString(),
+            }),
+          )
+        }
+      } catch (error) {
+        console.error("Error loading message count:", error)
+      }
+    }
+
+    loadMessageCount()
+  }, [])
+
   const handleSendMessage = async () => {
     if (!message.trim()) return
+
+    // Check if daily limit is reached
+    if (messagesSentToday >= MESSAGE_LIMIT) {
+      Alert.alert("Daily Limit Reached", "You've reached your limit of 20 messages for today. Try again tomorrow!")
+      return
+    }
 
     Keyboard.dismiss()
     const currentMessage = message
@@ -151,6 +216,21 @@ const TrainerScreen = ({ navigation, route }) => {
     setIsTyping(true)
 
     try {
+      // Update message count
+      const newCount = messagesSentToday + 1
+      setMessagesSentToday(newCount)
+      setIsLimitReached(newCount >= MESSAGE_LIMIT)
+
+      // Save updated count to AsyncStorage
+      const today = new Date()
+      await AsyncStorage.setItem(
+        "trainerMessageCount",
+        JSON.stringify({
+          count: newCount,
+          date: today.toISOString(),
+        }),
+      )
+
       await sendMessage(currentMessage)
     } catch (error) {
       console.error("Error sending message:", error)
@@ -171,9 +251,9 @@ const TrainerScreen = ({ navigation, route }) => {
   }
 
   const renderSuggestion = (text) => (
-    <TouchableOpacity style={styles.suggestionButton} onPress={() => handleSuggestionTap(text)}>
-      <Text style={styles.suggestionText}>{text}</Text>
-    </TouchableOpacity>
+    <Button variant="secondary" size="sm" style={styles.suggestionButton} onPress={() => handleSuggestionTap(text)}>
+      {text}
+    </Button>
   )
 
   const renderMessage = ({ item }) => {
@@ -183,7 +263,7 @@ const TrainerScreen = ({ navigation, route }) => {
       <View style={[styles.messageContainer, isTrainer ? styles.trainerMessageContainer : styles.userMessageContainer]}>
         {isTrainer && (
           <View style={styles.trainerAvatar}>
-            <Image source={require("../assets/logo.png")} style={styles.avatarImage} resizeMode="contain" />
+            <LogoImage style={styles.avatarImage} size={36} />
           </View>
         )}
 
@@ -215,10 +295,57 @@ const TrainerScreen = ({ navigation, route }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>AI Trainer</Text>
-          <TouchableOpacity style={styles.settingsButton}>
-            <Ionicons name="options-outline" size={24} color="white" />
-          </TouchableOpacity>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={() => {
+                Alert.alert(
+                  "Clear Chat History",
+                  "Are you sure you want to clear all chat history? This cannot be undone.",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Clear",
+                      style: "destructive",
+                      onPress: async () => {
+                        try {
+                          setSyncStatus("Clearing chat history...")
+                          const result = await clearConversations()
+                          if (result.success) {
+                            setSyncStatus("Chat history cleared successfully")
+                            setTimeout(() => setSyncStatus(null), 3000)
+                          } else {
+                            setSyncStatus("Error clearing chat history")
+                            setTimeout(() => setSyncStatus(null), 3000)
+                          }
+                        } catch (error) {
+                          console.error("Error clearing chat history:", error)
+                          setSyncStatus("Error clearing chat history")
+                          setTimeout(() => setSyncStatus(null), 3000)
+                        }
+                      },
+                    },
+                  ],
+                )
+              }}
+            >
+              <Ionicons name="trash-outline" size={20} color="white" />
+            </TouchableOpacity>
+            <View style={styles.messageCounter}>
+              <Text
+                style={[styles.messageCountText, messagesSentToday >= MESSAGE_LIMIT ? styles.limitReachedText : null]}
+              >
+                {messagesSentToday}/{MESSAGE_LIMIT}
+              </Text>
+            </View>
+          </View>
         </View>
+
+        {syncStatus && (
+          <View style={styles.syncStatusContainer}>
+            <Text style={styles.syncStatusText}>{syncStatus}</Text>
+          </View>
+        )}
 
         {isLoading ? (
           <View style={styles.loadingContainer}>
@@ -238,11 +365,11 @@ const TrainerScreen = ({ navigation, route }) => {
                   {
                     opacity: fadeAnim,
                     transform: [{ scale: scaleAnim }],
-                    shadowOpacity: 0.5, // Use a fixed value instead of interpolate
+                    shadowOpacity: 0.5,
                   },
                 ]}
               >
-                <Image source={require("../assets/logo.png")} style={styles.avatarLargeImage} resizeMode="contain" />
+                <LogoImage style={styles.avatarLargeImage} size={60} />
               </Animated.View>
               <View style={styles.trainerInfo}>
                 <Text style={styles.trainerName}>BetterU AI Trainer</Text>
@@ -299,6 +426,15 @@ const TrainerScreen = ({ navigation, route }) => {
               </View>
             )}
 
+            {messagesSentToday >= MESSAGE_LIMIT * 0.8 && messagesSentToday < MESSAGE_LIMIT && (
+              <View style={styles.limitWarningContainer}>
+                <Ionicons name="warning-outline" size={16} color="#FFC107" />
+                <Text style={styles.limitWarningText}>
+                  {MESSAGE_LIMIT - messagesSentToday} messages remaining today
+                </Text>
+              </View>
+            )}
+
             <View style={styles.suggestionsContainer}>
               <ScrollView
                 horizontal
@@ -316,20 +452,22 @@ const TrainerScreen = ({ navigation, route }) => {
             <View style={styles.inputContainer}>
               <TextInput
                 ref={inputRef}
-                style={styles.input}
-                placeholder="Ask your AI trainer..."
-                placeholderTextColor="#666"
+                style={[styles.input, isLimitReached && styles.disabledInput]}
+                placeholder={isLimitReached ? "Message limit reached for today" : "Ask your AI trainer..."}
+                placeholderTextColor={isLimitReached ? "#555" : "#666"}
                 value={message}
                 onChangeText={setMessage}
                 multiline
+                editable={!isLimitReached}
               />
-              <TouchableOpacity
-                style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
+              <Button
+                variant={message.trim() && !isLimitReached ? "primary" : "secondary"}
+                size="sm"
+                iconName="send"
+                style={styles.sendButton}
                 onPress={handleSendMessage}
-                disabled={!message.trim()}
-              >
-                <Ionicons name="send" size={20} color={message.trim() ? "black" : "#666"} />
-              </TouchableOpacity>
+                isDisabled={!message.trim() || isLimitReached}
+              />
             </View>
           </KeyboardAvoidingView>
         )}
@@ -393,10 +531,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255, 255, 255, 0.1)",
   },
   trainerAvatarLarge: {
-    width: 60, // Reduced from 70
-    height: 60, // Reduced from 70
+    width: 60,
+    height: 60,
     borderRadius: 30,
-    backgroundColor: "transparent",
+    backgroundColor: "black",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 15,
@@ -409,8 +547,7 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   avatarLargeImage: {
-    width: 56, // Reduced from 66
-    height: 56, // Reduced from 66
+    // No additional styling needed as LogoImage component handles the circular shape
   },
   trainerInfo: {
     flex: 1,
@@ -462,10 +599,10 @@ const styles = StyleSheet.create({
     flexDirection: "row-reverse",
   },
   trainerAvatar: {
-    width: 36, // Reduced from 40
-    height: 36, // Reduced from 40
+    width: 36,
+    height: 36,
     borderRadius: 18,
-    backgroundColor: "transparent",
+    backgroundColor: "black",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 8,
@@ -475,8 +612,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0, 153, 255, 0.3)",
   },
   avatarImage: {
-    width: 36, // Reduced from 40
-    height: 36, // Reduced from 40
+    // No additional styling needed as LogoImage component handles the circular shape
   },
   userAvatar: {
     width: 32, // Reduced from 36
@@ -607,6 +743,75 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  messageCounter: {
+    backgroundColor: "rgba(0, 153, 255, 0.2)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0, 153, 255, 0.3)",
+  },
+  messageCountText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  limitReachedText: {
+    color: "#FF5252",
+  },
+  limitWarningContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 193, 7, 0.1)",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 193, 7, 0.3)",
+  },
+  limitWarningText: {
+    color: "#FFC107",
+    fontSize: 13,
+    marginLeft: 6,
+  },
+  disabledInput: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    color: "#555",
+  },
+  syncStatusContainer: {
+    backgroundColor: "rgba(0, 153, 255, 0.1)",
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    marginHorizontal: 20,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(0, 153, 255, 0.3)",
+  },
+  syncStatusText: {
+    color: "#0099ff",
+    textAlign: "center",
+    fontSize: 14,
+  },
+  headerButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  clearButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 59, 48, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 59, 48, 0.3)",
   },
 })
 

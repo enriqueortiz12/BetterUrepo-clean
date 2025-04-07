@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Pressable, Animated, StyleSheet, Text, View, Platform } from "react-native"
+import { Ionicons } from "@expo/vector-icons"
 
 const HoverButton = (props) => {
   // Destructure props with safe defaults
@@ -11,11 +12,16 @@ const HoverButton = (props) => {
     textStyle = {},
     children = null,
     text = "",
-    icon = null,
+    iconName = null,
+    iconPosition = "left",
+    iconSize = 20,
+    iconColor = "white",
     disabled = false,
     activeOpacity = 0.7,
     hoverColor = undefined,
     pressColor = undefined,
+    isLoading = false,
+    loadingColor = "cyan",
     ...otherProps
   } = props || {}
 
@@ -24,6 +30,7 @@ const HoverButton = (props) => {
 
   // Create animated value for opacity
   const animatedOpacity = useRef(new Animated.Value(1)).current
+  const animatedScale = useRef(new Animated.Value(1)).current
   const isMounted = useRef(true)
 
   // Clean up animations when component unmounts
@@ -38,14 +45,19 @@ const HoverButton = (props) => {
 
     setIsPressed(true)
 
-    // Only animate on web to avoid native driver issues
-    if (Platform.OS === "web") {
+    // Animate both opacity and scale
+    Animated.parallel([
       Animated.timing(animatedOpacity, {
         toValue: activeOpacity,
         duration: 100,
-        useNativeDriver: false, // Don't use native driver on web
-      }).start()
-    }
+        useNativeDriver: true,
+      }),
+      Animated.timing(animatedScale, {
+        toValue: 0.97,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start()
   }
 
   const handlePressOut = () => {
@@ -53,19 +65,24 @@ const HoverButton = (props) => {
 
     setIsPressed(false)
 
-    // Only animate on web to avoid native driver issues
-    if (Platform.OS === "web") {
+    // Animate both opacity and scale back
+    Animated.parallel([
       Animated.timing(animatedOpacity, {
         toValue: 1,
         duration: 150,
-        useNativeDriver: false, // Don't use native driver on web
-      }).start()
-    }
+        useNativeDriver: true,
+      }),
+      Animated.timing(animatedScale, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start()
   }
 
   // Handle press event with debounce to prevent double-clicks
   const handlePress = () => {
-    if (disabled || !onPress) return
+    if (disabled || !onPress || isLoading) return
 
     // Remove the delay on iOS for better responsiveness
     if (Platform.OS === "ios") {
@@ -88,14 +105,58 @@ const HoverButton = (props) => {
     if (isPressed && pressColor) {
       return { backgroundColor: pressColor }
     }
-    if (isPressed && !pressColor) {
-      return { opacity: activeOpacity }
+    if (isPressed && hoverColor) {
+      return { backgroundColor: hoverColor }
     }
     return {}
   }
 
   // Render content based on props
   const renderContent = () => {
+    // If loading, show activity indicator
+    if (isLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <Animated.View
+            style={[
+              styles.loadingDot,
+              {
+                backgroundColor: loadingColor,
+                opacity: animatedOpacity.interpolate({
+                  inputRange: [0.7, 1],
+                  outputRange: [0.4, 1],
+                }),
+              },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.loadingDot,
+              {
+                backgroundColor: loadingColor,
+                opacity: animatedOpacity.interpolate({
+                  inputRange: [0.7, 1],
+                  outputRange: [0.7, 0.4],
+                }),
+              },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.loadingDot,
+              {
+                backgroundColor: loadingColor,
+                opacity: animatedOpacity.interpolate({
+                  inputRange: [0.7, 1],
+                  outputRange: [1, 0.7],
+                }),
+              },
+            ]}
+          />
+        </View>
+      )
+    }
+
     // If children are provided, render them
     if (children) {
       return children
@@ -104,40 +165,55 @@ const HoverButton = (props) => {
     // Otherwise, render text and/or icon
     return (
       <View style={styles.content}>
-        {icon && <View style={styles.iconContainer}>{icon}</View>}
+        {iconName && iconPosition === "left" && (
+          <Ionicons name={iconName} size={iconSize} color={iconColor} style={styles.leftIcon} />
+        )}
         {text ? (
           <Text style={[styles.text, textStyle]} numberOfLines={1}>
             {text}
           </Text>
         ) : null}
+        {iconName && iconPosition === "right" && (
+          <Ionicons name={iconName} size={iconSize} color={iconColor} style={styles.rightIcon} />
+        )}
       </View>
     )
   }
 
+  // Fix for the CSS error: Create a new transform array instead of modifying an existing one
+  const getAnimatedStyle = () => {
+    return {
+      opacity: animatedOpacity,
+      transform: [{ scale: animatedScale }],
+    }
+  }
+
   // Return the Pressable component
   return (
-    <Pressable
-      onPress={disabled ? null : handlePress}
-      onPressIn={disabled ? null : handlePressIn}
-      onPressOut={disabled ? null : handlePressOut}
-      style={({ pressed }) => [
-        styles.button,
-        style,
-        getBackgroundStyle(),
-        Platform.OS === "ios" && {
-          // Add slight shadow for better visibility on iOS
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 1 },
-          shadowOpacity: 0.1,
-          shadowRadius: 1,
-        },
-      ]}
-      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }} // Increase touch target
-      disabled={disabled}
-      {...otherProps}
-    >
-      {renderContent()}
-    </Pressable>
+    <Animated.View style={getAnimatedStyle()}>
+      <Pressable
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={({ pressed }) => [
+          styles.button,
+          style,
+          getBackgroundStyle(),
+          Platform.OS === "ios" && {
+            // Add slight shadow for better visibility on iOS
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.1,
+            shadowRadius: 1,
+          },
+        ]}
+        hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }} // Increase touch target
+        disabled={disabled || isLoading}
+        {...otherProps}
+      >
+        {renderContent()}
+      </Pressable>
+    </Animated.View>
   )
 }
 
@@ -155,13 +231,28 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  iconContainer: {
+  leftIcon: {
     marginRight: 8,
+  },
+  rightIcon: {
+    marginLeft: 8,
   },
   text: {
     fontSize: 16,
     color: "white",
     textAlign: "center",
+  },
+  loadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 8,
+  },
+  loadingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 2,
   },
 })
 

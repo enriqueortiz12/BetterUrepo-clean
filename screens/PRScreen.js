@@ -26,6 +26,10 @@ import GlassmorphicCard from "../components/GlassmorphicCard"
 // Add the import for our new chart components at the top of the file
 import ProgressChart from "../components/ProgressChart"
 import PredictionChart from "../components/PredictionChart"
+import { supabase } from "../lib/supabase"
+
+// Add this import at the top
+import Button from "../components/Button"
 
 // Get screen dimensions for responsive design
 const { width, height } = Dimensions.get("window")
@@ -40,6 +44,7 @@ const PRScreen = () => {
     deletePersonalRecord,
     resetPersonalRecords,
     isLoading: userLoading,
+    debugPRData, // Add this line
   } = useUser()
   const [modalVisible, setModalVisible] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -151,6 +156,63 @@ const PRScreen = () => {
       result = await updatePersonalRecord(currentPR.id, prData)
     } else {
       result = await addPersonalRecord(prData)
+    }
+
+    // Add this function to the handleSave function in PRScreen.js
+    // Insert this code right after updating the PR in Supabase
+
+    // Update user stats if this is a new PR for the current month
+    if (!editMode) {
+      try {
+        // Get the current user
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (user) {
+          // Get current month and year
+          const currentDate = new Date()
+          const currentMonth = currentDate.getMonth() + 1
+          const currentYear = currentDate.getFullYear()
+
+          // Get current stats
+          const { data: currentStats, error: statsError } = await supabase
+            .from("user_stats")
+            .select("*")
+            .eq("user_id", user.id)
+            .eq("current_month", currentMonth)
+            .eq("current_year", currentYear)
+            .single()
+
+          if (statsError && statsError.code !== "PGRST116") {
+            console.error("Error fetching current stats:", statsError)
+          } else if (currentStats) {
+            // Update existing record
+            await supabase
+              .from("user_stats")
+              .update({
+                prs_this_month: currentStats.prs_this_month + 1,
+                last_updated: new Date().toISOString(),
+              })
+              .eq("id", currentStats.id)
+          } else {
+            // Insert new record
+            await supabase.from("user_stats").insert([
+              {
+                user_id: user.id,
+                total_workouts: 0,
+                total_minutes: 0,
+                prs_this_month: 1,
+                current_month: currentMonth,
+                current_year: currentYear,
+              },
+            ])
+          }
+        }
+      } catch (statsError) {
+        console.error("Error updating user stats:", statsError)
+        // Continue with modal closing even if stats update fails
+      }
     }
 
     if (result.success) {
@@ -360,34 +422,6 @@ const PRScreen = () => {
   }
 
   // Add a function to create sample PR data for testing
-  const createSamplePRs = async () => {
-    const samplePRs = [
-      {
-        exercise: "Bench Press",
-        value: 185,
-        unit: "lbs",
-        target: 225,
-      },
-      {
-        exercise: "Squat",
-        value: 275,
-        unit: "lbs",
-        target: 315,
-      },
-      {
-        exercise: "Deadlift",
-        value: 315,
-        unit: "lbs",
-        target: 405,
-      },
-    ]
-
-    for (const pr of samplePRs) {
-      await addPersonalRecord(pr)
-    }
-
-    Alert.alert("Sample PRs Added", "Sample PR data has been added for testing.")
-  }
 
   // Reset PRs to initial data
   const handleResetPRs = () => {
@@ -407,6 +441,8 @@ const PRScreen = () => {
       },
     ])
   }
+
+  // Add a debug function
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -431,10 +467,16 @@ const PRScreen = () => {
             <Text style={styles.emptyText}>No personal records yet</Text>
             <Text style={styles.emptySubtext}>Tap the button below to add your first PR</Text>
 
-            {/* Add a button to create sample PRs for testing */}
-            <TouchableOpacity style={styles.sampleButton} onPress={createSamplePRs}>
-              <Text style={styles.sampleButtonText}>Add Sample PRs</Text>
-            </TouchableOpacity>
+            {/* Replace the sample button with an Add PR button */}
+            <Button
+              variant="primary"
+              size="md"
+              iconName="add"
+              style={styles.addPrButton}
+              onPress={() => handleOpenModal()}
+            >
+              Add PR Goal
+            </Button>
           </View>
         ) : (
           <>
@@ -521,10 +563,16 @@ const PRScreen = () => {
               </ScrollView>
             </View>
 
-            <TouchableOpacity style={styles.addButton} onPress={() => handleOpenModal()} activeOpacity={0.8}>
-              <Ionicons name="add" size={20} color="black" style={styles.addButtonIcon} />
-              <Text style={styles.addButtonText}>Add New PR Goal</Text>
-            </TouchableOpacity>
+            {/* Replace the add button with this: */}
+            <Button
+              variant="primary"
+              size="md"
+              iconName="add"
+              style={styles.addButton}
+              onPress={() => handleOpenModal()}
+            >
+              Add New PR Goal
+            </Button>
           </>
         )}
 
@@ -635,14 +683,16 @@ const PRScreen = () => {
                 </View>
 
                 <View style={styles.modalActions}>
-                  <TouchableOpacity style={styles.saveButton} onPress={handleSave} activeOpacity={0.8}>
-                    <Text style={styles.saveButtonText}>{editMode ? "Update" : "Save"}</Text>
-                  </TouchableOpacity>
+                  {/* Replace the save button with this: */}
+                  <Button variant="primary" size="md" style={styles.saveButton} onPress={handleSave}>
+                    {editMode ? "Update" : "Save"}
+                  </Button>
 
                   {editMode && (
-                    <TouchableOpacity style={styles.deleteButton} onPress={handleDelete} activeOpacity={0.8}>
-                      <Text style={styles.deleteButtonText}>Delete</Text>
-                    </TouchableOpacity>
+                    /* Replace the delete button with this: */
+                    <Button variant="danger" size="md" style={styles.deleteButton} onPress={handleDelete}>
+                      Delete
+                    </Button>
                   )}
                 </View>
               </View>
@@ -752,9 +802,15 @@ const PRScreen = () => {
                 </ScrollView>
               )}
 
-              <TouchableOpacity style={styles.compactCloseButton} onPress={() => setShowPredictionModal(false)}>
-                <Text style={styles.compactCloseButtonText}>Close</Text>
-              </TouchableOpacity>
+              {/* Replace the close button with this: */}
+              <Button
+                variant="secondary"
+                size="sm"
+                style={styles.compactCloseButton}
+                onPress={() => setShowPredictionModal(false)}
+              >
+                Close
+              </Button>
             </View>
           </View>
         </Modal>
@@ -1238,8 +1294,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
   },
-  bottomPadding: {
-    height: 120, // Increased to provide more space at the bottom
+  addPrButton: {
+    backgroundColor: "#0099ff",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addPrButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 16,
   },
 })
 

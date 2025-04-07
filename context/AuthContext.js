@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useState, useCallback } from "react"
 import { supabase } from "../lib/supabase"
 
 const AuthContext = createContext()
@@ -11,43 +11,10 @@ export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setIsLoading(false)
-      }
-    })
-
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setProfile(null)
-        setIsLoading(false)
-      }
-    })
-
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [])
-
-  // Update the fetchProfile function to be more robust and add a refetchProfile method
-  const fetchProfile = async (userId) => {
+  // Update the fetchProfile function to properly handle RLS
+  const fetchProfile = useCallback(async (userId) => {
     try {
-      setIsLoading(true)
-      console.log("AuthContext: Fetching profile for user ID:", userId)
+      console.log("AuthContext: Starting profile fetch for user:", userId)
 
       if (!userId) {
         console.error("AuthContext: No user ID provided to fetchProfile")
@@ -56,16 +23,41 @@ export const AuthProvider = ({ children }) => {
         return
       }
 
+      // Make sure we're using the authenticated client for this request
       const { data, error } = await supabase.from("profiles").select("*").eq("user_id", userId).single()
 
       if (error) {
         console.error("AuthContext: Error fetching profile:", error)
 
-        // If profile doesn't exist, try to create one
         if (error.code === "PGRST116") {
-          console.log("AuthContext: No profile found, attempting to create one")
-          await createInitialProfile(userId)
+          console.log("AuthContext: No profile found, creating one")
+
+          // Get user email
+          const { data: userData } = await supabase.auth.getUser()
+          const email = userData?.user?.email
+
+          // Create a simple profile
+          const initialProfile = {
+            user_id: userId,
+            full_name: email ? email.split("@")[0] : "New User",
+            email: email,
+            training_level: "intermediate",
+          }
+
+          const { data: newProfile, error: createError } = await supabase
+            .from("profiles")
+            .insert([initialProfile])
+            .select()
+
+          if (createError) {
+            console.error("AuthContext: Failed to create profile:", createError)
+            setProfile(initialProfile) // Use local data as fallback
+          } else {
+            console.log("AuthContext: Created new profile:", newProfile)
+            setProfile(newProfile[0])
+          }
         } else {
+          // For other errors, use a fallback profile
           setProfile(null)
         }
       } else {
@@ -76,9 +68,10 @@ export const AuthProvider = ({ children }) => {
       console.error("AuthContext: Exception in fetchProfile:", error)
       setProfile(null)
     } finally {
+      console.log("AuthContext: Finished profile fetch")
       setIsLoading(false)
     }
-  }
+  }, [])
 
   // Add a function to create an initial profile
   const createInitialProfile = async (userId) => {
@@ -107,6 +100,50 @@ export const AuthProvider = ({ children }) => {
       console.error("AuthContext: Error in createInitialProfile:", error)
     }
   }
+
+  // Update the auth state change handler to be more robust
+  useEffect(() => {
+    console.log("AuthContext: Setting up auth state listeners")
+
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log("AuthContext: Initial session check:", session?.user?.id)
+      setSession(session)
+      setUser(session?.user ?? null)
+
+      if (session?.user) {
+        fetchProfile(session.user.id)
+      } else {
+        setProfile(null)
+        setIsLoading(false)
+      }
+    })
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log("AuthContext: Auth state changed:", _event, session?.user?.id)
+
+      // Always update session and user
+      setSession(session)
+      setUser(session?.user ?? null)
+
+      if (session?.user) {
+        // Set loading to true before fetching profile
+        setIsLoading(true)
+        fetchProfile(session.user.id)
+      } else {
+        setProfile(null)
+        setIsLoading(false)
+      }
+    })
+
+    return () => {
+      console.log("AuthContext: Cleaning up auth state listeners")
+      subscription.unsubscribe()
+    }
+  }, [fetchProfile]) // Add fetchProfile to dependencies
 
   // Update the signUp function to better handle the auth state:
 
@@ -164,6 +201,21 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
+  // Improve error handling in the AuthContext
+  // Add this function to the AuthContext:
+
+  const handleAuthError = (error, operation) => {
+    console.error(`Error during ${operation}:`, error)
+    if (error.message) {
+      console.error(`Error message: ${error.message}`)
+    }
+    if (error.stack) {
+      console.error(`Error stack: ${error.stack}`)
+    }
+    return { error }
+  }
+
+  // Then update the signIn function to use it:
   const signIn = async (email, password) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -173,7 +225,7 @@ export const AuthProvider = ({ children }) => {
 
       return { error }
     } catch (error) {
-      return { error }
+      return handleAuthError(error, "sign in")
     }
   }
 
@@ -225,7 +277,18 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
-  // Add a refetchProfile method to the value object
+  // Update the refetchProfile method to use the same function
+  const refetchProfile = useCallback(
+    (userId) => {
+      if (!userId && user) userId = user.id
+      if (userId) {
+        fetchProfile(userId)
+      }
+    },
+    [user, fetchProfile],
+  )
+
+  // Include refetchProfile in the value object
   const value = {
     user,
     profile,
@@ -237,7 +300,7 @@ export const AuthProvider = ({ children }) => {
     updateProfile,
     resetPassword,
     updatePassword,
-    refetchProfile: () => user && fetchProfile(user.id),
+    refetchProfile,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
